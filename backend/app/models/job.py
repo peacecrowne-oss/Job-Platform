@@ -41,6 +41,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Numeric,
     String,
     Text,
@@ -94,6 +95,64 @@ class Job(Base):
             "('full_time', 'part_time', 'contract', 'temporary', 'internship', "
             "'apprenticeship', 'other')",
             name="ck_jobs_employment_type",
+        ),
+        # --- STORY-057: Database Indexing Strategy. Partial indexes on
+        # work_mode/employment_type exclude NULL rows -- Greenhouse (a real,
+        # live connector) never populates either field, so a large fraction
+        # of rows would otherwise bloat a full index with entries no filter
+        # query would ever match. ---
+        Index(
+            "ix_jobs_work_mode",
+            "work_mode",
+            postgresql_where=text("work_mode IS NOT NULL"),
+        ),
+        Index(
+            "ix_jobs_employment_type",
+            "employment_type",
+            postgresql_where=text("employment_type IS NOT NULL"),
+        ),
+        # Composite, broadest-to-narrowest: serves country-only,
+        # country+region, and country+region+city lookups via the leading-
+        # column-prefix property of a composite B-tree index.
+        Index(
+            "ix_jobs_location_country_region_city",
+            "location_country",
+            "location_region",
+            "location_city",
+        ),
+        # Serves STORY-032's "newest jobs first" sort; a B-tree index scans
+        # efficiently in either direction, so no separate DESC index needed.
+        Index("ix_jobs_posting_date", "posting_date"),
+        # GIN expression index over exactly STORY-030's literal full-text
+        # field list (title, company, description, skills). No new stored
+        # column -- an expression index only. STORY-030 owns the actual
+        # search query/ranking/API that uses this; this Story only builds
+        # the index, per requirement.md's own literal text for STORY-057.
+        # Routed through jobs_search_vector_english(), an IMMUTABLE SQL
+        # wrapper created by this Story's migration: to_tsvector() (both
+        # overloads) and array_to_string() are only STABLE in Postgres, not
+        # IMMUTABLE (confirmed empirically via two separate failed CREATE
+        # INDEX attempts), and CREATE INDEX rejects any non-IMMUTABLE
+        # function anywhere in an index expression. Wrapping the entire
+        # coalesce/concatenation/to_tsvector logic inside one custom
+        # function explicitly labeled IMMUTABLE is the standard, documented
+        # Postgres workaround: Postgres trusts a function's declared
+        # volatility rather than inspecting what it calls internally. Safe
+        # here because the language config ('english') is a hardcoded
+        # literal, never a column value.
+        # Casts (::text/::text[]) are spelled out explicitly to match
+        # Postgres's own catalog reflection of this expression exactly
+        # (varchar columns passed to a text-typed function parameter are
+        # implicitly cast, and pg_get_indexdef() always renders that cast
+        # explicitly) -- without this, `alembic check` reports a spurious
+        # diff against a functionally-identical, already-correct index.
+        Index(
+            "ix_jobs_search_vector",
+            text(
+                "jobs_search_vector_english(job_title::text, company_name::text, "
+                "description_full, skills::text[])"
+            ),
+            postgresql_using="gin",
         ),
     )
 
