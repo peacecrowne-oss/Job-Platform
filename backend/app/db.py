@@ -10,11 +10,12 @@ running the backend where that guarantee doesn't hold.
 
 import logging
 import time
+from collections.abc import Generator
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
 
@@ -46,6 +47,20 @@ def get_session_factory() -> sessionmaker:
     if _session_factory is None:
         _session_factory = sessionmaker(bind=get_engine(), autoflush=False, autocommit=False)
     return _session_factory
+
+
+def get_db() -> Generator[Session, None, None]:
+    """FastAPI dependency yielding a request-scoped Session (STORY-030 --
+    the first Story to wire a route to the database). Closes the session
+    after the request regardless of outcome; does not commit -- read-only
+    routes have nothing to commit, and any future write route owns its own
+    transaction boundary explicitly, per this repo's established
+    convention (see app/ingestion/dedup.py's upsert_job())."""
+    session = get_session_factory()()
+    try:
+        yield session
+    finally:
+        session.close()
 
 
 def check_database_connection(max_attempts: int = 5, initial_delay: float = 0.5) -> bool:

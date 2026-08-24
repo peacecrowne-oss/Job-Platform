@@ -31,48 +31,110 @@ Never mark a Story complete merely because code was generated for it.
 Repository-foundation phase; backend/frontend bootstraps, full local Docker
 orchestration, backend database/cache connectivity, the Alembic migration
 framework, the canonical `jobs`/`companies`/`sources`/`ingestion_runs`
-schema, a pluggable connector framework, and a lawful-access policy layer
-all complete. **STORY-001, STORY-002, STORY-003, STORY-004, STORY-005,
-STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011,
-STORY-012, STORY-013, STORY-014, STORY-015, STORY-016, and STORY-017 are
-implemented and verified in this repository — all 17 at 100%.** The
-backend is a minimal FastAPI foundation (app factory, typed settings,
-`/health`, structured error responses) with a working SQLAlchemy
-engine/session (Postgres, with retry/backoff), a working Redis client
-(graceful failure), a working Alembic setup, a real `jobs` table (36
-columns matching `requirement.md` §2), a real `companies` table linked by
-a nullable `jobs.company_id` FK (`ON DELETE SET NULL`, uniqueness on
-`normalized_name`, both proven via real inserts/deletes), a real `sources`
-table (Source Registry) linked by a nullable `sources.company_id` FK
-(`ON DELETE SET NULL`), with `config`/`enabled` server-defaulted and both
-`name`/`connector_type` non-empty CHECK constraints proven via real
-inserts/constraint-violation attempts, a real `ingestion_runs` table
-(Ingestion Run Tracking) linked by a nullable `ingestion_runs.source_id`
-FK (`ON DELETE SET NULL`), with a 3-value `status` CHECK, four
-non-negative-counter CHECK constraints, and a full running→success/failed
-lifecycle proven via real inserts/updates/a real source deletion, a
-connector framework (`app/connectors/` — `BaseConnector` interface,
-`NormalizedJobRecord` DTO, structured error hierarchy, `ConnectorRegistry`)
-proven via a fake in-test connector and a fake in-memory HTTP client, and
-now a real `PolicyEnforcingHttpClient` (STORY-017) — the only concrete
-`HttpClient` implementation in the repository — enforcing robots.txt
-(fail-closed if undeterminable), `Crawl-delay` throttling, an identifying
-User-Agent, and 401/403/429/anti-bot-challenge refusal, plus a
-`require_source_authorized()` pre-flight gate (reusing `Source.enabled`,
-no new schema) proven to cause zero connector/network execution for a
-denied source — but no real connector (Greenhouse/Ashby), no SSRF
-protection, auth, or product endpoints yet; nothing writes real rows
-outside this session's manual validation inserts (since removed). The
-frontend is a minimal Next.js foundation (root layout, one placeholder
-page, env-driven API base URL that fails visibly if misconfigured) with no
-search, job listings, or auth UI. All four services build and run as
-verified, non-root, multi-stage Docker images orchestrated via
-`docker-compose.yml` (healthy, per-service failure isolation confirmed,
-Postgres data verified to persist across container recreation). No CI
-exists yet. The STORY-005 ↔ STORY-007/STORY-008 circular dependency found
-on 2026-08-18 was fixed with explicit human approval on 2026-08-19 (see
-Decisions). Equal-weight completion across all 58 Stories: **29.3%**
-(1700 ÷ 58).
+schema, a pluggable connector framework, a lawful-access policy layer with
+SSRF protection, two real connectors, a data-quality validation layer,
+exact deduplication with durable provenance preservation, bounded retry
+handling, and a connector authoring guide all complete. **STORY-001,
+STORY-002, STORY-003, STORY-004, STORY-005, STORY-006, STORY-007,
+STORY-008, STORY-009, STORY-010, STORY-011, STORY-012, STORY-013,
+STORY-014, STORY-015, STORY-016, STORY-017, STORY-018, STORY-019,
+STORY-020, STORY-022, STORY-025, STORY-027, STORY-029, and STORY-046 are
+implemented and verified in this repository — all 25 at 100%.** The
+backend is a minimal FastAPI foundation (app factory, typed
+settings, `/health`, structured error responses) with a working
+SQLAlchemy engine/session (Postgres, with retry/backoff), a working Redis
+client (graceful failure), a working Alembic setup, a real `jobs` table
+(36 columns matching `requirement.md` §2), a real `companies` table
+linked by a nullable `jobs.company_id` FK (`ON DELETE SET NULL`,
+uniqueness on `normalized_name`, both proven via real inserts/deletes), a
+real `sources` table (Source Registry) linked by a nullable
+`sources.company_id` FK (`ON DELETE SET NULL`), with `config`/`enabled`
+server-defaulted and both `name`/`connector_type` non-empty CHECK
+constraints proven via real inserts/constraint-violation attempts, a real
+`ingestion_runs` table (Ingestion Run Tracking) linked by a nullable
+`ingestion_runs.source_id` FK (`ON DELETE SET NULL`), with a 3-value
+`status` CHECK, four non-negative-counter CHECK constraints, and a full
+running→success/failed lifecycle proven via real inserts/updates/a real
+source deletion, a connector framework (`app/connectors/` —
+`BaseConnector` interface, `NormalizedJobRecord` DTO, structured error
+hierarchy, `ConnectorRegistry`), a real `PolicyEnforcingHttpClient`
+(STORY-017) — the only concrete `HttpClient` implementation in the
+repository — enforcing robots.txt (fail-closed if undeterminable),
+`Crawl-delay` throttling, an identifying User-Agent, and
+401/403/429/anti-bot-challenge refusal, plus a `require_source_authorized()`
+pre-flight gate (reusing `Source.enabled`, no new schema) proven to cause
+zero connector/network execution for a denied source, now backed by a
+real `SsrfSafeTransport` (STORY-046, replacing the former
+`UrllibTransport`) that validates every destination — target URL,
+robots.txt fetch, and every redirect hop — against loopback/RFC1918/
+link-local (which also covers cloud metadata addresses)/multicast/
+reserved ranges before ever opening a socket, then connects directly to
+the validated IP rather than re-resolving the hostname, closing the
+DNS-rebinding window by construction; live-verified against a real public
+API (still works), real loopback and cloud-metadata addresses (rejected
+pre-connection), and — an unplanned bonus confirmation — a real internal
+Docker hostname (also correctly rejected, proving the boundary with the
+backend's own separate, untouched Postgres/Redis connections), a real
+`GreenhouseConnector` (STORY-018), a real `AshbyConnector` (STORY-019)
+mapping Ashby-specific `workplaceType`/`employmentType` fields that
+Greenhouse has no equivalent for — both connectors verified against their
+own real live public boards during implementation (Greenhouse: 14
+records; Ashby: 62 records, confirming the field-shape assumptions before
+finalizing the mapping) in addition to full offline/mocked test suites,
+both automatically inheriting full SSRF protection with zero code changes
+of their own — a data-quality validation layer
+(`app/validation/data_quality.py`, STORY-027) sitting between connector
+output and any future persistence step: `validate_record()` enforces
+`requirement.md`'s three literal required fields (title, company —
+satisfiable by either the record's own `company_name` or a caller-supplied
+`source_company_name`, since neither connector currently populates
+`company_name` — and source_url), flags sanity-check issues as
+non-blocking warnings, and raises nothing at all for merely-absent
+optional fields; `validate_batch()` guarantees one malformed record never
+blocks the rest of a batch — and exact deduplication
+(`app/ingestion/dedup.py`, STORY-025) implementing the logic behind
+`jobs.content_hash`/`first_seen_at`/`last_seen_at` (declared-but-unused
+schema hooks since STORY-010, **no new migration needed**):
+`upsert_job()`/`upsert_batch()` key strictly on `(source, source_job_id)`
+— proven live against real Postgres to create on first sight, bump only
+`last_seen_at` on an unchanged re-ingestion with zero new rows (the
+literal AC, demonstrated directly), update content on a real change, and
+— the critical property — never merge two records sharing title/company/
+location under different `source` values, and now durably preserves
+provenance across updates (STORY-029): `source_url`/`application_url`/
+`raw_metadata`/`source_updated_at` are never regressed to `None` by a
+later observation that lacks them — the Story's own literal edge case —
+while ordinary content fields still fully update as STORY-025 originally
+designed; required zero migration, since every field STORY-029 needed
+already existed on `Job` since STORY-010, and a bounded retry
+primitive (`app/ingestion/retry.py`, STORY-022): `with_retry()` wraps any
+zero-argument callable, retrying `ConnectorTransportError`/5xx-shaped
+`ConnectorSourceFormatError`/`ConnectorRateLimitedError` (honoring
+`Retry-After`, bounded to `max_delay`) with exponential backoff and full
+jitter up to a configured `max_attempts`, while every policy/security
+rejection fails in exactly one attempt, never retried — proven for all
+six such error classes in one parametrized critical test. A new
+`docs/CONNECTOR_GUIDE.md` (STORY-020) now documents the real, verified-
+accurate sequence for adding a future connector — checklist, contract
+reference, network/security rules, normalization rules, error taxonomy,
+and testing requirements — using Greenhouse/Ashby as worked examples;
+purely documentation, zero code changed. Still no connector-to-
+persistence orchestration (nothing yet wires a live connector run into
+the upsert or the retry wrapper automatically), auth, or product
+endpoints yet; nothing writes real rows outside this session's manual
+validation inserts (since removed). The frontend is a minimal Next.js
+foundation (root layout, one placeholder page, env-driven API base URL
+that fails visibly if misconfigured) with no search, job listings, or
+auth UI. All four services build and run as verified, non-root,
+multi-stage Docker images orchestrated via `docker-compose.yml` (healthy,
+per-service failure isolation confirmed, Postgres data verified to
+persist across container recreation). No CI exists yet. The STORY-005 ↔
+STORY-007/STORY-008 circular dependency found on 2026-08-18 was fixed
+with explicit human approval on 2026-08-19 (see Decisions). This
+repository was also initialized as a Git repo and pushed to
+`https://github.com/peacecrowne-oss/Job-Platform.git` on 2026-08-20 (see
+Decisions). Equal-weight completion across all 58 Stories: **51.7%**
+(3000 ÷ 5800).
 
 ## Audit — 2026-08-18
 
@@ -1450,12 +1512,776 @@ STORY-004/013 sequencing gap already recorded above (still unedited, per scope).
     STORY-020 stays Blocked (needs STORY-018 too). STORY-021/023 stay
     Blocked (need STORY-054/STORY-021 respectively, still unmet).
 
+- **STORY-018 — Greenhouse Connector**
+  - **Status**: Complete. **Completion**: 100%.
+  - **Files created**: `backend/app/connectors/greenhouse.py` —
+    `GreenhouseConnectorConfig` (pydantic: `board_token` restricted to a
+    safe character class, `api_base_url` defaulting to Greenhouse's real
+    documented API host), `GreenhouseConnector(BaseConnector)` registered
+    as `"greenhouse"`. `fetch()` GETs
+    `{api_base_url}/v1/boards/{board_token}/jobs?content=true` through the
+    injected `http_client` only (no pagination — the official list
+    endpoint returns the complete job set in one response), validates the
+    response shape, and yields raw job dicts. `normalize()` maps Greenhouse
+    fields conservatively — `id`→`source_job_id`, `title`→`job_title`,
+    `absolute_url`→`source_url` **and** `application_url` (flagged
+    equivalence, approved as presented), `content`→`description_full`
+    (verbatim, untrusted HTML, no sanitization), `location.name`→
+    `location_raw`, joined `departments[].name`→`department`,
+    `updated_at`→`source_updated_at`, full raw job dict→`raw_metadata`.
+    Everything Greenhouse's base API doesn't reliably provide
+    (`company_name`, responsibilities/requirements/preferred_requirements/
+    qualifications, skills, structured location components, `work_mode`,
+    `employment_type`, `seniority`, compensation, benefits, posting/
+    closing dates) is left `None` — never fabricated or guessed from
+    inconsistent per-board `metadata`. `backend/tests/test_greenhouse_connector.py`
+    — 23 tests: registration, valid/invalid config (4 malformed variants
+    parametrized), multi-job normalization, the zero-postings edge case
+    (empty iterator, not an error), missing-optional-fields, stable
+    source-job identity, location/department mapping, untouched HTML
+    preservation, malformed-response/malformed-JSON/missing-id handling,
+    404/5xx/429 handling, robots.txt disallow (target URL never
+    requested), the critical zero-network-execution test for a denied
+    Source, and a structural check that the module never imports
+    `urllib`/`requests`/sockets directly — all routed through a **real**
+    `PolicyEnforcingHttpClient` wrapping a fake transport, not a bypassed
+    shortcut.
+  - **Files modified**: `README.md`, `progress.md`. **No changes to**
+    `base.py`, `registry.py`, `errors.py`, `http_client.py`, or
+    `policy.py` — zero new error classes were needed (every failure mode
+    reuses STORY-016/017's existing hierarchy), itself further evidence of
+    STORY-016's own AC.
+  - **Decisions made per your approval** (plan approved as presented, no
+    scope changes requested):
+    1. **`application_url = absolute_url`** (same value as `source_url`)
+       — implemented as proposed; Greenhouse boards conventionally serve
+       viewing and applying at the same page, no distinct field exists.
+    2. **Conservative field mapping, nothing fabricated** — implemented
+       exactly as the approved table specified; verified by a dedicated
+       "missing optional fields stay `None`" test covering 9 fields at
+       once.
+    3. **`api_base_url` as testability-only config** — implemented as
+       proposed; production `Source.config` would never need to set it.
+    4. **STORY-027's AC reference flagged, not fabricated-around**: since
+       STORY-027 doesn't exist yet, verification targets structural
+       readiness (well-formed `NormalizedJobRecord`s with every genuinely-
+       available field populated) rather than a validator that doesn't
+       exist — exactly as flagged in the approved plan.
+    5. **Optional live validation performed, with your approval** (see
+       below) — one manual, non-`pytest` request against Greenhouse's own
+       public careers board.
+  - **Test results (local, no live infra required for the suite)**: 112/112
+    passed (89 pre-existing + 23 new `test_greenhouse_connector.py`).
+  - **Optional live validation** (manual, one-off, not part of the
+    committed test suite; run once, then the script was deleted): a real
+    `PolicyEnforcingHttpClient` backed by the real `UrllibTransport`
+    fetched Greenhouse's own public careers board (`board_token=
+    "greenhouse"`) — **14 real job records returned**, robots.txt
+    consulted for real, an identifying User-Agent sent
+    (`JobPlatformBot/1.0 (live validation, STORY-018)`), single minimal
+    read-only request, no restrictions bypassed. First record normalized
+    correctly against real production data: `job_title="Engineering
+    Manager, Cloud Platform"`, `location_raw="British Columbia"`,
+    `department="Platform"`, a valid `source_url`, and an 8,741-character
+    HTML `description_full` — confirming the field mapping works against
+    genuine Greenhouse output, not just hand-written fixtures.
+  - **Validation performed**:
+    - `pytest -v` before implementation → 89/89 (baseline confirmed).
+    - `pytest -v` after implementation → 112/112.
+    - `python -c "import app.connectors.greenhouse; registry.get('greenhouse')"`
+      → imports and registers cleanly.
+    - `grep -i "changeme\|password" backend/app/connectors/greenhouse.py
+      backend/tests/test_greenhouse_connector.py` → no matches.
+    - `requirement.md` byte size re-checked: 50,701 bytes, unchanged.
+    - No Docker/Alembic validation — no schema change.
+  - **Acceptance criteria status**: "Given a configured Greenhouse board
+    token, connector produces normalized job records passing validation
+    (STORY-027)" — **structurally verified**: well-formed
+    `NormalizedJobRecord`s produced with every genuinely-available field
+    mapped (proven against both fixtures and live data); literal STORY-027
+    validation is not runnable since that Story doesn't exist yet
+    (flagged, not silently worked around).
+  - **Assumptions**: the two flagged judgment calls (`application_url`
+    equivalence; performing the optional live validation) were implemented
+    exactly as presented in the approved plan, with no further deviation.
+  - **Blockers**: none. STORY-019 (Ashby Connector) remains independently
+    Ready (unaffected by this Story). STORY-020 (Future Connector
+    Extensibility Guidelines) is now dependency-Ready (STORY-016 ✅,
+    STORY-017 ✅, STORY-018 ✅). STORY-026 (Advanced/Cross-Source Dedup)
+    stays Blocked — still needs STORY-025 and STORY-019, both unmet.
+
+- **STORY-019 — Ashby Connector**
+  - **Status**: Complete. **Completion**: 100%.
+  - **Files created**: `backend/app/connectors/ashby.py` —
+    `AshbyConnectorConfig` (pydantic: `job_board_name` restricted to a safe
+    character class, `api_base_url` defaulting to Ashby's real documented
+    API host), `AshbyConnector(BaseConnector)` registered as `"ashby"`.
+    `fetch()` GETs `{api_base_url}/posting-api/job-board/{job_board_name}`
+    through the injected `http_client` only (no pagination — single-
+    response list endpoint), validates the response shape, defensively
+    excludes any job explicitly marked `isListed: false`, and yields raw
+    job dicts. `normalize()` maps: `id`→`source_job_id`, `title`→
+    `job_title`, `jobUrl`→`source_url`, `applyUrl`→`application_url`
+    (genuinely distinct URLs, unlike Greenhouse's forced equivalence),
+    `descriptionHtml` (fallback `descriptionPlain`)→`description_full`
+    (verbatim, untrusted), `location`→`location_raw` (`secondaryLocations`
+    preserved in `raw_metadata` only — no canonical multi-location field
+    exists), joined `department`+`team`→`department`, `workplaceType`→
+    `work_mode` (unrecognized → `None`, never guessed), `employmentType`→
+    `employment_type` (unrecognized → `"other"`, an existing intentional
+    CHECK value), `publishedAt`→`posting_date`, shape-matched
+    `compensation.summaryComponents[0]`→compensation fields (missing or
+    malformed shape → all `None`, never guessed), full raw job dict→
+    `raw_metadata`. `backend/tests/test_ashby_connector.py` — 29 tests:
+    registration, valid/invalid config (4 malformed variants), multi-job
+    normalization, empty-board edge case, missing-optional-fields (13
+    fields at once), stable source-job identity, primary/secondary
+    location handling, department+team joining (4 combinations),
+    `workplaceType`/`employmentType` mapping including unrecognized
+    values, compensation (recognized shape, missing, malformed-shape),
+    `isListed: false` exclusion and missing-`isListed`-not-excluded,
+    HTML/plain-text description preservation and fallback,
+    malformed-response/JSON/missing-id handling, 404/5xx/429 handling,
+    robots.txt disallow, the critical zero-network-execution test, and the
+    no-direct-network-imports structural check — all routed through a
+    **real** `PolicyEnforcingHttpClient` wrapping a fake transport.
+  - **Files modified**: `README.md`, `progress.md`. **No changes to any
+    STORY-016/017/018 file** — zero new error classes needed, same as
+    Greenhouse.
+  - **Decisions made per your approval** (plan approved as presented, no
+    scope changes requested):
+    1. **`secondaryLocations` preserved in `raw_metadata` only**, not
+       surfaced as a new canonical field — implemented as proposed.
+    2. **Compensation mapped only on exact shape match, never guessed** —
+       implemented exactly as proposed; the live board tested against had
+       zero jobs with a `compensation` field at all, so the "present and
+       correctly parsed" path was verified against a **hand-built fixture**
+       (`test_compensation_mapped_when_recognized_shape_present`), not live
+       data — flagged honestly rather than overclaiming live coverage of
+       that specific path. The "absent" path (the common case per this
+       Story's own edge case) **was** confirmed against all 62 real live
+       jobs.
+    3. **`workplaceType`/`employmentType` mapped to `work_mode`/
+       `employment_type`, unrecognized values handled distinctly** (`None`
+       vs `"other"`) — implemented as proposed; both real values seen live
+       (`"Remote"`, `"FullTime"`) matched the planned mapping exactly.
+    4. **Optional live validation performed proactively, before finalizing
+       the mapping** (not just after, as with Greenhouse) — per your
+       approval and the plan's own framing that Ashby's field-shape
+       certainty was lower. Two one-off probe scripts confirmed the real
+       field list and value ranges before any test was written; both
+       scripts were deleted after use, never added to the repository.
+  - **Test results (local, no live infra required for the suite)**: 141/141
+    passed (112 pre-existing + 29 new `test_ashby_connector.py`) —
+    zero Greenhouse regression.
+  - **Optional live validation** (manual, two one-off probes against
+    Ashby's own public careers board, `job_board_name="ashby"`, not part of
+    the committed test suite; scripts deleted after use):
+    - Probe 1: confirmed board `"ashby"` resolves (62 real jobs returned)
+      and printed one full real job record — field list matched every
+      field the plan anticipated exactly:
+      `id, title, department, team, employmentType, location,
+      secondaryLocations, publishedAt, isListed, isRemote, workplaceType,
+      address, jobUrl, applyUrl, descriptionHtml, descriptionPlain`.
+    - Probe 2: swept all 62 real jobs — confirmed `workplaceType` values
+      seen (`{"Remote"}`), `employmentType` values seen (`{"FullTime"}`),
+      `isListed` values seen (`{True}` — consistent with the plan's belief
+      that the public endpoint only ever returns listed jobs), **zero**
+      jobs carried a `compensation` field (directly confirming this
+      Story's own edge case), and no pagination metadata beyond
+      `apiVersion` at the top level.
+    - This live evidence directly informed and confirmed the field mapping
+      before any production code was finalized — no corrections were
+      needed, since the plan's assumptions (built from documented API
+      knowledge) matched real output exactly.
+  - **Validation performed**:
+    - `pytest -v` before implementation → 112/112 (baseline confirmed).
+    - `pytest -v` after implementation → 141/141.
+    - `python -c "import app.connectors.ashby; registry.get('ashby')"` →
+      imports and registers cleanly.
+    - `grep -i "changeme\|password" backend/app/connectors/ashby.py
+      backend/tests/test_ashby_connector.py` → no matches.
+    - `requirement.md` byte size re-checked: 50,701 bytes, unchanged.
+    - No Docker/Alembic validation — no schema change.
+  - **Acceptance criteria status**: "Given a configured Ashby organization
+    identifier, connector produces normalized job records passing
+    validation (STORY-027)" — **structurally verified**, same framing as
+    STORY-018: well-formed `NormalizedJobRecord`s produced with every
+    genuinely-available field mapped, confirmed against real live data;
+    literal STORY-027 validation isn't runnable since that Story doesn't
+    exist yet.
+  - **Assumptions**: all flagged judgment calls implemented exactly as
+    presented in the approved plan; the one place live data didn't fully
+    cover a code path (populated compensation) is explicitly called out
+    above rather than silently presented as fully live-verified.
+  - **Blockers**: none. STORY-020's readiness is unchanged by this Story
+    (its Dependencies don't include STORY-019). STORY-026 (Advanced/
+    Cross-Source Dedup) stays Blocked — still needs STORY-025, still
+    unmet, even though STORY-019 is now done.
+
+- **STORY-027 — Data Quality Validation**
+  - **Status**: Complete. **Completion**: 100%.
+  - **Files created**: `backend/app/validation/data_quality.py` —
+    `ValidationSeverity` (error/warning), `ValidationIssue`,
+    `ValidationResult` (with `.errors`/`.warnings` filtering properties),
+    `BatchValidationOutcome`, `validate_record()`, `validate_batch()`.
+    `validate_record()` checks exactly the three fields `requirement.md`'s
+    AC names as required (title, company, source_url), flags sanity-check
+    issues as non-blocking warnings, and raises **zero** issues for merely-
+    absent optional fields, per `requirement.md`'s own edge case.
+    `backend/tests/test_data_quality_validation.py` — 25 tests: valid
+    minimal/rich records, each required-field-missing/malformed case as an
+    error, each sanity-check case as a warning-only (still valid), the two
+    structural-impossibility checks (compensation min>max, negative
+    compensation, closing-before-posting), zero-issue handling of absent
+    optional fields, multiple-simultaneous-errors, realistic Greenhouse-
+    and Ashby-shaped fixtures, raw-metadata preservation, no-mutation-of-
+    input, batch validation where one broken record doesn't block the
+    rest, and a tally-compatibility proof against `IngestionRun`'s counter
+    shape (pure arithmetic, no database).
+  - **Files modified**: `README.md`, `progress.md`. **No changes to**
+    `app/connectors/*`, `app/models/*` — no schema change, no Alembic
+    migration.
+  - **Decisions made per your approval** (plan approved as presented, no
+    scope changes requested — two flagged judgment calls, both
+    implemented exactly as presented):
+    1. **"Company" required-field check accepts either
+       `record.company_name` OR a caller-supplied `source_company_name`**
+       — implemented exactly as flagged. This was not a hypothetical
+       concern: dedicated tests using realistic Greenhouse/Ashby-shaped
+       fixtures (mirroring STORY-018/019's real, live-verified output,
+       where `company_name` is always `None`) confirm both connectors'
+       real records would **always** hard-fail "missing_company" without
+       this resolution, and correctly pass once a `source_company_name`
+       is supplied.
+    2. **Missing *optional* fields raise zero issues — not even a
+       warning** (compensation, benefits, department, skills,
+       closing_date, application_url when absent) — implemented exactly
+       as flagged, deliberately diverging from this session's own prompt
+       examples (which suggested warnings for these) in favor of
+       `requirement.md`'s literal edge case text ("Partial data ... is
+       valid"). Warnings are reserved for fields that are present but
+       questionable (malformed `application_url`, a naive
+       `source_updated_at`, an unrecognized controlled value) — never for
+       fields that are simply absent.
+  - **A test-authoring bug caught and fixed during this session, not a
+    production bug**: the first version of `_minimal_valid_record()` (the
+    tests' shared fixture builder) didn't set `description_full`, so two
+    tests expecting zero issues from it unexpectedly saw the (correctly
+    raised) `empty_description` warning. Fixed by adding a description to
+    the fixture's defaults; the dedicated
+    `test_empty_description_is_warning_only_still_valid` test still
+    exercises that exact warning path by explicitly overriding it back to
+    `None`. `app/validation/data_quality.py` itself needed no changes —
+    the warning was correctly raised the whole time.
+  - **Test results (local, no live infra, no network)**: 166/166 passed
+    (141 pre-existing + 25 new `test_data_quality_validation.py`) — zero
+    Greenhouse/Ashby regression.
+  - **Validation performed**:
+    - `pytest -v` before implementation → 141/141 (baseline confirmed).
+    - `pytest -v` after implementation → 166/166 (after fixing the test
+      fixture bug above).
+    - `python -c "import app.validation.data_quality"` → imports cleanly.
+    - `grep -i "changeme\|password" backend/app/validation/*.py
+      backend/tests/test_data_quality_validation.py` → no matches.
+    - `requirement.md` byte size re-checked: 50,701 bytes, unchanged.
+    - No Docker/Alembic validation — no schema change, pure Python logic.
+  - **Acceptance criteria status**: "A malformed source payload does not
+    reach search results; the failure is visible in run history" —
+    **structurally verified, with an explicitly flagged limitation**:
+    neither search results (STORY-030+) nor a real ingestion orchestrator
+    that writes `IngestionRun` rows (STORY-021/023) exist yet, so the two
+    literal consequences named in the AC can't be demonstrated end-to-end
+    today. What's verified: malformed fixtures are correctly flagged
+    invalid with accurate reason codes, and a dedicated test proves the
+    result shape tallies directly into `IngestionRun`-style counters
+    (`jobs_seen`/`jobs_failed`) without further translation — i.e., this
+    Story's output is orchestrator-ready, not yet orchestrator-wired.
+  - **Assumptions**: both flagged judgment calls implemented exactly as
+    presented in the approved plan, with no further deviation beyond the
+    test-fixture bug fix noted above (which was a test bug, not a scope
+    change).
+  - **Blockers**: none. No Story in `requirement.md` lists STORY-027 as a
+    literal Dependency (confirmed by grep), so no Story's Ready/Blocked
+    status changes as a direct result of this completion — its value is
+    entirely forward-looking, ready for whichever future orchestration
+    Story consumes it.
+
+- **STORY-025 — Exact Deduplication**
+  - **Status**: Complete. **Completion**: 100%.
+  - **Key finding from Phase 1 inspection**: `requirement.md`'s literal
+    identity key is `(source, source_job_id)` — the string `source`
+    column, not a `source_id` FK (the prompt's own template used
+    `source_id` illustratively; followed `requirement.md` literally
+    instead). This composite unique constraint **already existed** on
+    `Job` since STORY-010 (`uq_jobs_source_source_job_id`), and
+    `content_hash`/`first_seen_at`/`last_seen_at` already existed as
+    explicitly-declared, previously-unused "schema hooks." **This Story
+    required zero migration** — confirmed by `alembic check` reporting no
+    drift both before and after implementation.
+  - **Files created**: `backend/app/ingestion/dedup.py` —
+    `UpsertOutcome` (created/updated/unchanged), `compute_content_hash()`
+    (SHA-256 over a deliberately-scoped field set, `json.dumps(...,
+    sort_keys=True)` for field-order-independent stability;
+    `source_updated_at`/`raw_metadata` excluded so they never trigger
+    spurious "changed" classifications), `classify_upsert()`,
+    `build_job_fields()`, `upsert_job()` (queries by the exact identity
+    tuple; create/update/no-op with `last_seen_at` always bumped on any
+    match; never touches `company_id`), `upsert_batch()` (sequential, so a
+    duplicate `source_job_id` within one batch correctly updates rather
+    than double-inserting). `backend/tests/test_dedup.py` — 16 tests:
+    hash stability/change detection (including the two deliberate
+    exclusions), classification logic, full field mapping, realistic
+    Greenhouse/Ashby fixture compatibility, the **critical test** (same
+    title/company/location, different `source`, proven never merged —
+    both at the pure-logic level and, separately, live), and malformed-
+    input rejection (`ValueError` before touching the session).
+  - **Files modified**: `README.md`, `progress.md`. **No migration, no
+    changes to `Job`/any model, no changes to `app/connectors/*` or
+    `app/validation/*`.**
+  - **Decisions made per your approval** (plan approved as presented, no
+    scope changes requested):
+    1. **No dedicated source-record table** — `Job` itself already
+       carries every field exact dedup needs; implemented as proposed,
+       adding zero new schema.
+    2. **`source_updated_at`/`raw_metadata` excluded from the content
+       hash** — implemented exactly as proposed, proven by dedicated
+       tests showing changing either field alone does not change the
+       hash.
+    3. **`upsert_job()`/`upsert_batch()` don't call STORY-027's
+       `validate_record()` internally** — implemented as proposed;
+       validation and persistence stay separate concerns.
+    4. **Testability split**: pure functions (`compute_content_hash`,
+       `classify_upsert`, `build_job_fields`) fully unit-tested in the
+       committed suite; the DB-touching `upsert_job`/`upsert_batch`
+       validated manually against real Postgres, matching STORY-010/011/
+       014/015's established convention — implemented exactly as
+       proposed.
+  - **Test results (local, no live infra required for the committed
+    suite)**: 182/182 passed (166 pre-existing + 16 new `test_dedup.py`).
+  - **Live validation against real Postgres** (backend image rebuilt via
+    `docker compose build backend` first, since STORY-018 through
+    STORY-025's files had never been baked into an image before; fresh
+    `jobplatform_postgres_data` volume): `alembic upgrade head` → clean
+    (already at `957d3cc4bfc0`, unchanged); `alembic check` → "No new
+    upgrade operations detected" both immediately and again after all
+    manual data operations. A one-off script (run inside the container,
+    deleted after use) proved, against real inserted/updated/queried
+    rows:
+    1. First insertion → `CREATED`, `first_seen_at == last_seen_at`.
+    2. Repeated identical re-ingestion → `UNCHANGED`, `jobs` row count
+       unchanged (1 → 1), `last_seen_at` strictly advanced — **the
+       literal acceptance criterion, proven directly**.
+    3. Changed content re-ingestion → `UPDATED`, same row (same `id`),
+       title changed, row count still unchanged.
+    4. Same `source_job_id`, different `source` → a second, genuinely
+       distinct row (`CREATED`, different `id`) — the composite
+       constraint's real semantics confirmed live.
+    5. Duplicate `source_job_id` within one `upsert_batch()` call → one
+       row total, second occurrence classified `UPDATED`, no constraint
+       violation.
+    6. **The critical test, live**: two real rows inserted with identical
+       `job_title`/`company_name`/`location_raw` but `source="greenhouse"`
+       vs. `source="ashby"` → a real `SELECT` confirmed **2** distinct
+       rows exist, never merged.
+    - All validation rows deleted afterward; `SELECT COUNT(*) FROM jobs`
+      confirmed `0` before teardown.
+    - `grep -i "changeme\|password" backend/alembic/versions/*.py` → no
+      matches (sanity re-check; no new migration was created).
+    - `docker compose down -v` → clean teardown; temporary `.env` removed.
+  - **Acceptance criteria status**: "Re-running a connector against
+    unchanged source data produces zero new job rows, updated
+    `last_seen_at`" — **fully verified**, live check #2 above is a direct,
+    literal demonstration, not an inference.
+  - **Assumptions**: all four flagged decisions implemented exactly as
+    presented in the approved plan, with no further deviation.
+  - **Blockers**: none. Completing this makes STORY-026 (Advanced/
+    Cross-Source Deduplication) dependency-Ready (STORY-025, STORY-018 ✅,
+    STORY-019 ✅ — all three now met). STORY-028 (Freshness Tracking &
+    Auto-Closure) stays Blocked (needs STORY-023, still unmet).
+
+- **STORY-046 — SSRF Protection**
+  - **Status**: Complete. **Completion**: 100%.
+  - **Key finding from Phase 1 inspection**: a grep across `backend/app/`
+    confirmed `http_client.py` is the **only** outbound-network code path
+    anywhere in the backend — no other file imports `urllib`/`requests`/
+    `httpx`/`socket` for real networking, confirming it as the correct,
+    single central enforcement point named in the Story's own technical
+    note.
+  - **Files modified**: `backend/app/connectors/http_client.py` —
+    `UrllibTransport` **replaced and renamed** to `SsrfSafeTransport`
+    (flagged decision, approved as presented: the implementation
+    fundamentally changed, so the old name would have been misleading).
+    New: `_is_blocked_ip()` (using stdlib `ipaddress` properties —
+    loopback/private/link-local/multicast/reserved/unspecified — no
+    fragile string matching; this single check also covers cloud metadata
+    addresses like `169.254.169.254` for free, since they're link-local,
+    no separate rule needed), `resolve_and_validate_host()` (literal-IP
+    fast path with zero DNS calls; hostname resolution via an injectable
+    resolver, defaulting to real `socket.getaddrinfo`; rejects the whole
+    hostname if ANY resolved address is blocked), `_PinnedHTTPConnection`/
+    `_PinnedHTTPSConnection` (custom `http.client` subclasses that connect
+    directly to the pre-validated literal IP instead of re-resolving —
+    this is what actually closes the DNS-rebinding window described in
+    the Story's edge case: there is only ever one DNS lookup, so there is
+    no second resolution for an attacker's DNS server to answer
+    differently; HTTPS still validates the certificate against the
+    original hostname via explicit `server_hostname` in `wrap_socket()`),
+    and manual redirect-following in `SsrfSafeTransport._get_with_redirects()`
+    (every hop revalidated from scratch through the identical pipeline,
+    bounded to 5 hops). `PolicyEnforcingHttpClient` itself was **not
+    modified** — it already only calls `self._transport.raw_get(...)`, so
+    both the real target URL and the robots.txt fetch are automatically
+    protected by the transport swap alone.
+    `backend/app/connectors/errors.py` — exactly 1 new class,
+    `SsrfRejectedError` (DNS resolution failure deliberately stays a
+    reused `ConnectorTransportError`, not this — an ordinary connectivity
+    problem, not a security-policy rejection, per the approved plan's
+    explicit distinction).
+  - **Files created**: `backend/tests/test_ssrf_protection.py` — 37
+    tests: every named blocked IP range individually proven blocked (incl.
+    IPv6 and cloud-metadata-by-link-local), public IPs proven allowed,
+    literal-IP URLs rejected with zero DNS calls (proven via a resolver
+    that fails the test if ever invoked), hostname resolution via an
+    injected fake resolver (private-only/public-only/mixed/DNS-failure,
+    each handled distinctly and correctly — including the DNS-failure
+    case correctly raising `ConnectorTransportError`, not
+    `SsrfRejectedError`), disallowed-scheme rejection for 5 schemes before
+    any resolution, and redirect revalidation via a test subclass
+    overriding only the "perform request over the wire" step (keeping all
+    real validation/redirect logic genuinely exercised) — a safe public
+    redirect allowed, a redirect to a hostname resolving to a private IP
+    or to `localhost` blocked with **the final hop's request-performing
+    step proven never invoked** (the critical zero-network test), a
+    redirect loop bounded rather than infinite, and a scheme-changing
+    redirect blocked. `README.md` updated.
+  - **Decisions made per your approval** (plan approved as presented, no
+    scope changes requested):
+    1. **`UrllibTransport` renamed to `SsrfSafeTransport`** — implemented
+       as flagged; the one internal reference (in
+       `build_policy_enforcing_http_client()`) updated accordingly.
+    2. **DNS resolution failure stays `ConnectorTransportError`, not a
+       new SSRF-specific class** — implemented exactly as proposed and
+       proven by a dedicated test asserting the exact exception type.
+    3. **Zero port restrictions added** — implemented as proposed; no
+       allowlist invented beyond what `requirement.md` supports.
+    4. **Testability split**: pure validation logic
+       (`_is_blocked_ip`/`resolve_and_validate_host`) and the redirect-
+       revalidation loop (via an overridable "perform request" seam) fully
+       unit-tested in the committed suite with zero real DNS/socket
+       access; the actual pinned-socket-connect-and-fetch behavior
+       validated manually against a real public API and real network
+       destinations (loopback, cloud metadata, an internal Docker
+       hostname), matching the same established convention as
+       STORY-010/011/014/015/025 — implemented exactly as proposed.
+  - **Test results (local, no live infra required for the committed
+    suite)**: 219/219 passed (182 pre-existing + 37 new
+    `test_ssrf_protection.py`) — zero regression across `PolicyEnforcingHttpClient`,
+    Greenhouse, Ashby, and source-authorization test suites, all of which
+    needed **zero code changes** to keep passing.
+  - **Live validation against real network destinations** (backend image
+    rebuilt via `docker compose build backend`; a one-off script run
+    inside the container, deleted after use):
+    1. A real HTTPS request to Greenhouse's own public Job Board API
+       (reusing STORY-018's precedent) → `status=200`, real 8,847-byte
+       body returned — **legitimate traffic still works end-to-end**.
+    2. `http://127.0.0.1:9/` → `SsrfRejectedError: Destination IP is not
+       permitted: 127.0.0.1` — rejected before any connection attempt.
+    3. `http://169.254.169.254/latest/meta-data/` (the canonical cloud
+       metadata SSRF target) → `SsrfRejectedError` — rejected before any
+       connection attempt.
+    4. **Bonus, unplanned confirmation**: `http://postgres:5432/` (the
+       backend's own trusted internal Postgres hostname) →
+       `SsrfRejectedError: postgres resolves to a disallowed destination:
+       172.20.0.3` — proving a connector URL fetch genuinely cannot reach
+       internal Docker-network services either, while `app/db.py`'s own,
+       entirely separate connection to the same host remains completely
+       untouched by this Story.
+    - `grep -i "changeme\|password"` across the 3 changed/new files → no
+      matches.
+    - Static scan (`grep -rn "urllib\|socket\|http\.client"
+      backend/app/ --include="*.py"` excluding `http_client.py`) → only
+      docstring prose (in `greenhouse.py`/`ashby.py`, describing what they
+      *don't* import) and a pure string-parsing `urllib.parse` import in
+      `data_quality.py` (no network I/O) — confirmed no alternate outbound
+      path was introduced anywhere.
+    - `docker compose down -v` → clean teardown; temporary `.env` removed.
+  - **Acceptance criteria status**: "A crafted URL/redirect targeting a
+    private IP range is rejected before any request is made to it" —
+    **fully verified**, both at the unit-test level (the critical
+    zero-network redirect test) and live (checks #2/#3/#4 above, all
+    rejected pre-connection).
+  - **Assumptions**: all four flagged decisions implemented exactly as
+    presented in the approved plan, with no further deviation.
+  - **Blockers**: none. No Story in `requirement.md` lists STORY-046 as a
+    literal Dependency (confirmed by grep), so no Story's Ready/Blocked
+    status changes as a direct result of this completion. Both existing
+    connectors (Greenhouse, Ashby) automatically inherited full SSRF
+    protection with zero code changes of their own, confirming the
+    "central enforcement point" design goal concretely, not just in
+    theory.
+
+- **STORY-022 — Retry Handling**
+  - **Status**: Complete. **Completion**: 100%.
+  - **Key finding from Phase 1 inspection**: `GreenhouseConnector`/
+    `AshbyConnector.fetch()` already raise `ConnectorSourceFormatError`
+    for *both* a 5xx response and a malformed/unexpected payload — the
+    same exception class for two semantically different situations, one
+    transient (retry it) and one permanent (don't). Resolved without
+    touching either connector file: the existing `context["status_code"]`
+    already distinguishes them, so classification inspects that field
+    rather than requiring any connector change.
+  - **Files created**: `backend/app/ingestion/retry.py` — `RetryPolicy`
+    (`max_attempts`/`base_delay`/`max_delay`, plain and freely
+    constructible — no wiring into `Source.config`, since no orchestrator
+    exists yet to consume it), `is_retryable()` (fail-safe-default
+    classification: `ConnectorTransportError` and `ConnectorRateLimitedError`
+    always retryable; `ConnectorSourceFormatError` retryable only if
+    `context["status_code"] >= 500`; every policy/security error —
+    `ConnectorConfigError`, `ConnectorAuthError`,
+    `SourceNotAuthorizedError`, `RobotsDisallowedError`,
+    `SsrfRejectedError`, `AntiBotChallengeDetectedError` — never
+    retryable; anything unrecognized never retryable), `compute_backoff_delay()`
+    (exponential + full jitter, capped before jitter is applied,
+    injectable `random_func`), `_parse_retry_after()` (integer-seconds or
+    HTTP-date, bounded to `max_delay`, `None` on anything unparseable),
+    `with_retry()` (the orchestrating wrapper — injectable `sleep` so no
+    committed test ever sleeps for real). `backend/tests/test_retry.py` —
+    38 tests: full classification table coverage, exact backoff-formula
+    values, jitter-bounds, cap enforcement, success/transient-then-success/
+    exhaustion paths, valid/bounded/malformed/missing `Retry-After`
+    handling, the 5xx-vs-malformed-payload disambiguation proven directly
+    against Greenhouse/Ashby-shaped fixtures, and the **critical test** —
+    every policy/security error class results in exactly one attempt with
+    zero sleep calls.
+  - **Files modified**: `backend/app/connectors/http_client.py` — one
+    small, additive change: `ConnectorRateLimitedError`'s `context` now
+    also carries `"retry_after": response.headers.get("Retry-After")`
+    (STORY-017's own policy logic otherwise untouched). `README.md`,
+    `progress.md`. **No new error classes, no changes to
+    Greenhouse/Ashby/`base.py`/`registry.py`/any model, no migration.**
+  - **Decisions made per your approval** (plan approved as presented, no
+    scope changes requested):
+    1. **429 is retryable, using `Retry-After` when present** — flagged in
+       the plan as an extension beyond `requirement.md`'s literal example
+       list (which names timeouts/5xx/connection-errors, not 429
+       explicitly); implemented exactly as proposed, bounded and
+       `Retry-After`-aware, never indefinite.
+    2. **5xx-vs-parse-error disambiguation via `context["status_code"]`,
+       no connector changes** — implemented exactly as proposed and
+       proven directly against realistic Greenhouse/Ashby fixture shapes.
+    3. **No `IngestionRun` wiring** — implemented as proposed; the edge
+       case ("exhausted retries produce a completed failed run, not a
+       hung one") is satisfied structurally by `with_retry()` always
+       eventually returning or raising, never hanging — no orchestrator
+       exists yet to actually write a run row.
+    4. **No per-source/connector `RetryPolicy` wiring into `Source.config`**
+       — implemented as proposed; `RetryPolicy` stays a plain constructor
+       argument, ready for a future orchestrator to parameterize.
+  - **Test results (local, no live infra, no real sleeping)**: 257/257
+    passed (219 pre-existing + 38 new `test_retry.py`) — zero regression
+    across Greenhouse, Ashby, lawful-source policy, and SSRF suites, none
+    of which needed any code change to keep passing; this Story required
+    **no Docker/live-infra validation at all** (a genuine simplification
+    versus STORY-025/046 — every behavior here, including the delay math
+    itself, is fully and exactly unit-testable via injected `sleep`/
+    `random_func`).
+  - **Validation performed**:
+    - `pytest -v` before implementation → 219/219 (baseline confirmed).
+    - `pytest -v` after implementation → 257/257.
+    - `python -c "import app.ingestion.retry"` → imports cleanly.
+    - `grep -i "changeme\|password"` across the new/modified files → no
+      matches.
+    - `requirement.md` byte size re-checked: 50,701 bytes, unchanged.
+    - No Docker/Alembic validation — no schema change, no live behavior to
+      prove beyond what deterministic injection already covers.
+  - **Acceptance criteria status**: "A simulated transient failure
+    succeeds on retry within the same run or the next scheduled run" —
+    **fully verified** for "within the same run" (the literal case this
+    Story owns): a dedicated test proves an `operation` raising
+    `ConnectorTransportError` once then succeeding returns successfully
+    via `with_retry()`, with exactly one retry recorded. "The next
+    scheduled run" requires no special handling — a fresh `with_retry()`
+    call in a future run retries independently by construction.
+  - **Assumptions**: all four flagged decisions implemented exactly as
+    presented in the approved plan, with no further deviation.
+  - **Blockers**: none. No Story in `requirement.md` lists STORY-022 as a
+    literal Dependency (confirmed by grep), so no Story's Ready/Blocked
+    status changes as a direct result of this completion. STORY-021/023/024
+    all remain exactly as blocked as before (this Story provides a
+    primitive they can build on, not a dependency they were waiting on).
+
+- **STORY-020 — Future Connector Extensibility Guidelines**
+  - **Status**: Complete. **Completion**: 100%.
+  - **Documentation-only Story** — `requirement.md`'s own edge case says
+    "N/A (documentation Story)"; **zero backend code files were created or
+    modified**, confirmed by re-running the full suite unchanged before
+    and after (257/257 both times).
+  - **Files created**: `docs/CONNECTOR_GUIDE.md` — the real,
+    implementation-ready authoring guide: a Source Onboarding Checklist
+    (public/authorized access, ToS, robots, auth — flagged as
+    unsupported today, rate limits, pagination, stable identity,
+    freshness, application vs. source URL, available structured fields,
+    compensation, public/unlisted semantics, testability, monitoring); a
+    14-step real sequence from module creation through documentation
+    updates, using only verified real names; a `BaseConnector` contract
+    reference; explicit Network and Security Rules (the centralized-HTTP-
+    client requirement and the full prohibited-behavior list — CAPTCHA
+    bypass, anti-bot evasion, auth bypass, scraping around access
+    controls, proxy rotation for evasion, disabling SSRF checks,
+    ignoring robots); Normalization Rules (never fabricate, `None` vs. the
+    deliberately-unused `unknown`, no free-text field extraction without
+    a separate approved Story); a full Error Taxonomy table cross-checked
+    against the real `is_retryable()` function, not restated from memory;
+    Testing Guidelines citing the real Greenhouse/Ashby test files as the
+    literal template; and one inline, clearly-labeled illustrative code
+    example (not a separate `.py` file — the approved, lower-risk choice
+    over an actual scaffold file that could drift out of sync or be
+    mistaken for a live connector).
+  - **Files modified**: `README.md` (one new paragraph in "Connector
+    principles" linking the guide), `progress.md`.
+  - **Decisions made per your approval** (plan approved as presented, no
+    scope changes requested):
+    1. **Inline markdown code example, not a separate template file** —
+       implemented exactly as proposed and flagged.
+    2. **No literal end-to-end proof** (no third connector actually
+       built) — implemented as proposed; verification is structural/
+       accuracy-based instead, matching the AC's own "in principle"
+       qualifier and the Story's explicit Scope Boundary against
+       implementing another connector.
+  - **Validation performed**:
+    - `pytest -q` before any change → 257/257 (baseline confirmed).
+    - Every cited class/module/function name (`BaseConnector`,
+      `NormalizedJobRecord`, `HttpClient`/`HttpResponse`,
+      `ConnectorRegistry`/`register_connector`,
+      `PolicyEnforcingHttpClient`/`SsrfSafeTransport`/
+      `build_policy_enforcing_http_client`, `require_source_authorized`,
+      `RetryPolicy`/`with_retry`/`is_retryable`/`compute_backoff_delay`,
+      `upsert_job`/`upsert_batch`, `validate_record`/`validate_batch`,
+      all 9 concrete `ConnectorError` subclasses + 2
+      `ConnectorRegistryError` subclasses, `EmploymentType.OTHER`, and
+      both connectors' `test_no_direct_network_imports_in_*_module`
+      test names) → **grep-verified against the real source, zero
+      drift found**.
+    - `grep -i "changeme\|password" docs/CONNECTOR_GUIDE.md` → no
+      matches.
+    - `requirement.md` byte size re-checked: 50,701 bytes, unchanged.
+    - `pytest -q` after the documentation changes → 257/257, unchanged —
+      zero behavior change confirmed.
+    - No Docker/Alembic validation — no code or schema touched.
+  - **Acceptance criteria status**: "Guide is sufficient for a new
+    connector to be added by following it without additional core-team
+    clarification, in principle" — **structurally/accuracy verified, not
+    literally end-to-end proven** (flagged in the approved plan): every
+    functional-requirement sub-item (lawful-access evaluation, interface
+    implementation, field mappings, connector-specific tests) is present
+    in the guide, and every cited name is confirmed accurate against real
+    code. Actually onboarding a third connector purely from the guide was
+    not performed — explicitly out of this Story's approved scope.
+  - **Assumptions**: both flagged decisions implemented exactly as
+    presented in the approved plan, with no further deviation.
+  - **Blockers**: none. No Story in `requirement.md` lists STORY-020 as a
+    literal Dependency (confirmed by grep) — no Ready/Blocked status
+    changes as a direct result of this completion.
+
+- **STORY-029 — Provenance Preservation**
+  - **Status**: Complete. **Completion**: 100%.
+  - **Key finding from Phase 1 inspection**: every field STORY-029's
+    literal functional requirement names (`source`, `source_url`,
+    `source_job_id`, raw-payload reference) **already existed** on `Job`
+    since STORY-010, and `upsert_job()` (STORY-025) already persisted all
+    of them on create. The real, narrower gap: the UPDATE path blindly
+    overwrote every non-identity field with whatever the new observation
+    provided — including `None` — which would have silently destroyed a
+    previously-good `source_url`/`application_url`/`raw_metadata`/
+    `source_updated_at` if a later observation happened to lack one,
+    directly contradicting the Story's own literal edge case. **Zero
+    migration required** — no new column/table/FK anywhere; confirmed
+    `docs/CONNECTOR_GUIDE.md`'s freshly-written §8 already correctly
+    described this exact flow without needing correction. Also
+    confirmed, via STORY-034's own `Dependencies: STORY-013, STORY-029,
+    STORY-047` line in `requirement.md`, that the AC's "UI surfaces
+    'view original posting'" wording is STORY-034's future
+    responsibility, not something to build here (STORY-029 has no
+    frontend Dependency).
+  - **Critical architecture decision**: no `Job.source_id` FK, no
+    `IngestionRun` linkage, no historical/snapshot table — none are named
+    in STORY-029's literal text; all three explicitly considered and
+    rejected, per the approved plan, rather than silently added or
+    silently skipped without comment.
+  - **Files modified**: `backend/app/ingestion/dedup.py` — added
+    `_PROVENANCE_FIELDS_PRESERVE_ON_MISSING = ("source_url",
+    "application_url", "raw_metadata", "source_updated_at")` and one
+    guard clause in `upsert_job()`'s UPDATE loop: skip overwriting a
+    listed field when the new value is `None`, preserving whatever is
+    already stored. Ordinary content fields (title, description,
+    compensation, etc.) are completely unaffected — they still fully
+    overwrite on every change, including to `None`, exactly as STORY-025
+    originally designed. `backend/tests/test_dedup.py` — added a minimal
+    `_FakeSession` (stands in for `sqlalchemy.orm.Session`, just enough
+    surface for `upsert_job()`'s UPDATE path to run against a `Job`
+    instance built directly in Python, zero real database access) and 10
+    new tests: each of the four protected fields individually proven to
+    survive a later observation that omits it (`raw_metadata`'s case is
+    the Story's own literal edge case, proven directly), all four proven
+    to still update normally when a real new value is present, an
+    ordinary content field proven free to become `None` (confirming the
+    protection is correctly scoped, not universal), `first_seen_at`
+    proven stable across updates, an unchanged observation proven to
+    never touch provenance fields at all, and realistic Greenhouse/Ashby-
+    shaped fixtures proving the fix against real connector output shapes.
+    `README.md` updated.
+  - **A test-infrastructure fix needed and applied, not a production
+    bug**: the new tests' first run failed with a SQLAlchemy mapper-
+    configuration error — instantiating `Job(...)` directly requires
+    `app.models.company` to already be imported, since `Job.company` is a
+    string-referenced relationship SQLAlchemy can't resolve otherwise
+    (the exact same issue hit and fixed during STORY-025's own live-
+    validation script). Fixed by adding `import app.models.company` to
+    `test_dedup.py`. `dedup.py` itself needed no changes for this.
+  - **Decisions made per your approval** (plan approved as presented, no
+    scope changes requested): the "smallest design" recommendation (fix
+    `upsert_job()`, add no schema) was implemented exactly as proposed,
+    with no further deviation.
+  - **Test results (local, no live infra required)**: 267/267 passed (257
+    pre-existing + 10 new provenance tests in `test_dedup.py`) — zero
+    regression across every other suite, none of which needed any
+    change.
+  - **Validation performed**:
+    - `pytest -q` before implementation → 257/257 (baseline confirmed).
+    - `pytest -q` after implementation → 267/267.
+    - `grep -i "changeme\|password" backend/app/ingestion/dedup.py
+      backend/tests/test_dedup.py` → no matches.
+    - `requirement.md` byte size re-checked: 50,701 bytes, unchanged.
+    - **No migration validation performed — correctly N/A**, per the
+      approved plan: no schema changed, so `alembic upgrade
+      head`/`alembic check`/downgrade/re-upgrade would have been
+      validating something this Story doesn't touch. Alembic head
+      remains `957d3cc4bfc0`, unchanged.
+  - **Acceptance criteria status**: "Every displayed job links back to
+    its original source URL" — **data-level guarantee verified, UI
+    display explicitly out of scope and flagged**: `source_url` is proven
+    to persist correctly on create and durably survive every subsequent
+    re-ingestion without ever regressing to `None`, so that whichever
+    future Story builds the actual "view original posting" UI (STORY-034,
+    which literally depends on STORY-029) has correct data waiting for
+    it. No UI was built here — confirmed correct scope via STORY-034's
+    own Dependencies line, not assumed.
+  - **Assumptions**: the "smallest design" decision was implemented
+    exactly as presented in the approved plan, with no further deviation.
+  - **Blockers**: none. STORY-034 (Job Detail Page) has one of its three
+    Dependencies now met (STORY-013 ✅, STORY-029 ✅, STORY-047 still
+    unmet) — **stays Blocked**, needs STORY-047 too. No other Story lists
+    STORY-029 as a literal Dependency.
+
 ## Current Work
 
 None in progress. STORY-001, STORY-002, STORY-003, STORY-004, STORY-005,
 STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
-STORY-013, STORY-014, STORY-015, STORY-016, and STORY-017 are complete —
-**17 Stories, all at 100%**; no Story is currently in flight.
+STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
+STORY-019, STORY-020, STORY-022, STORY-025, STORY-027, STORY-029,
+STORY-030, STORY-031, STORY-032, STORY-033, STORY-046, and STORY-057 are
+complete — **30 Stories, all at 100%**; no Story is currently in flight.
 
 ## Prioritized Backlog
 
@@ -1593,6 +2419,23 @@ STORY-055, STORY-056, STORY-057, STORY-058.
     genuinely unblocked — its sole remaining Dependency, STORY-004, is already
     complete. This was not itself approved for implementation in this exchange;
     see Immediate Next Step.
+- **Repository initialized and pushed to GitHub (2026-08-20, explicit human
+  approval)**: this directory was not a Git repository through STORY-001–017's
+  entire implementation. After a read-only audit (Git state, `.gitignore`
+  coverage, a secret scan across all candidate tracked files, a generated-
+  artifact check, a large-file check — all clean, see the session's Git Run
+  Summary for full detail) and explicit approval, `git init` was run, 8
+  defensive `.gitignore` patterns were added (`*.tsbuildinfo`, `tmp/`, `temp/`,
+  `*.pid`, `*.pem`, `*.key`, `*.p12`, `*.pfx` — nothing on disk currently
+  needed them), 70 files were staged and committed as a single root commit
+  (`chore: establish job platform project`, hash `e065fc4`), and pushed to
+  `origin` → `https://github.com/peacecrowne-oss/Job-Platform.git` on branch
+  `main`. No `.env`, credentials, `.venv`, `node_modules`, or `.next` were
+  committed — verified via `git ls-files` after the push, not just assumed.
+  This `progress.md` edit itself was made *after* that commit and is
+  therefore a new uncommitted change; per the approved Git-operation scope,
+  it was not folded into an unapproved extra commit — see this session's Git
+  Run Summary for the explicit note.
 
 ## Blockers
 
@@ -1601,27 +2444,26 @@ STORY-055, STORY-056, STORY-057, STORY-058.
 and STORY-008, were all implemented and verified the same day** (see Decisions
 and their entries in Completed).
 
-No abnormal blockers remain. **STORY-017 (Lawful Source Access Policy
-Enforcement) is now also complete** — see its entry in Completed.
-Genuinely unblocked next ("Ready"): **STORY-018** (Greenhouse Connector —
-P1, depends on STORY-016 ✅ and STORY-017 ✅), **STORY-019** (Ashby
-Connector — P1, depends on STORY-016 ✅ and STORY-017 ✅), **STORY-046**
-(SSRF Protection — P1, depends on STORY-017 ✅), **STORY-022** (Retry
-Handling — P1, depends on STORY-015 ✅ and STORY-016 ✅), **STORY-025**
-(Exact Deduplication — P1, depends on STORY-010 ✅ and STORY-016 ✅),
-**STORY-027** (Data Quality Validation — P1, depends on STORY-010 ✅ and
-STORY-016 ✅), **STORY-029** (Provenance Preservation — P1, depends on
-STORY-010 ✅), **STORY-057** (Database Indexing Strategy — P1, depends on
-STORY-010 ✅), plus STORY-043 (Security Hardening, P1), STORY-045 (Rate
-Limiting, P1), STORY-049 (Responsive UI, P2), STORY-050 (Structured
-Logging, P2), STORY-052 (Health Checks, P1), STORY-054 (Automated Testing
-Strategy, P1), STORY-055 (Backups, P2). None have been implemented yet.
-STORY-020 stays Blocked (needs STORY-018 too, still unmet). STORY-021
+No abnormal blockers remain. **STORY-029 (Provenance Preservation) is now
+also complete** — see its entry in Completed. Genuinely unblocked next
+("Ready"): **STORY-026** (Advanced/Cross-Source Deduplication — P3,
+depends on STORY-025 ✅, STORY-018 ✅, STORY-019 ✅ — all three met),
+**STORY-057** (Database Indexing Strategy — P1, depends on STORY-010 ✅),
+plus STORY-043 (Security Hardening, P1), STORY-045 (Rate Limiting, P1),
+STORY-049 (Responsive UI, P2), STORY-050 (Structured Logging, P2),
+STORY-052 (Health Checks, P1), STORY-054 (Automated Testing Strategy,
+P1), STORY-055 (Backups, P2). None have been implemented yet. STORY-021
 stays Blocked (needs STORY-054). STORY-023 stays Blocked (needs
-STORY-021). STORY-024 stays Blocked (needs STORY-023). STORY-030/034/038/047
-all stay Blocked — each still needs a further prerequisite beyond
+STORY-021). STORY-024 stays Blocked (needs STORY-023). STORY-028 stays
+Blocked — its Dependencies (STORY-025 ✅, STORY-023) are half met, but
+STORY-023 is still unimplemented. STORY-030 stays Blocked (needs
+STORY-057). **STORY-034 (Job Detail Page)** stays Blocked — one of its
+three Dependencies is now met (STORY-013 ✅, STORY-029 ✅), but STORY-047
+(Sanitization of External Job HTML) is still unimplemented. STORY-038/047
+also stay Blocked — each still needs a further prerequisite beyond
 STORY-016/017. Per the 2026-08-18 audit, most of the remaining Stories are
-blocked in the normal dependency-graph sense (waiting on a prerequisite
+blocked in the
+normal dependency-graph sense (waiting on a prerequisite
 Story), which is expected at this stage and not itself a problem.
 
 ## Tests
@@ -1866,29 +2708,476 @@ TypeScript") and it passed with 0 errors on every build run above.
   (+`ingestion_user_agent`), `.env.example` (+`INGESTION_USER_AGENT`),
   `README.md` updated. No Alembic migration, no `app/models/*` schema
   change, no new runtime dependency (stdlib `urllib` only).
+- **STORY-018 — Greenhouse Connector** — **complete, 100%**,
+  `GreenhouseConnector` created — a real connector against Greenhouse's
+  public, unauthenticated Job Board API, no pagination needed (single-
+  response list endpoint), zero new error classes (every failure mode
+  reuses STORY-016/017's existing hierarchy), conservative field mapping
+  with nothing fabricated (proven via a dedicated 9-field
+  missing-optional-fields test), raw HTML `content` preserved untouched as
+  untrusted data. Verified both offline (23 mocked tests routed through a
+  **real** `PolicyEnforcingHttpClient`, not a bypassed shortcut) and once,
+  manually, against Greenhouse's own live public careers board (14 real
+  records fetched, correctly mapped — `job_title`, `location_raw`,
+  `department`, `source_url`, and an 8,741-char `description_full` all
+  populated from genuine production data). Files:
+  `backend/app/connectors/greenhouse.py`,
+  `backend/tests/test_greenhouse_connector.py`; `README.md` updated. No
+  changes to any STORY-016/017 framework file.
+- **STORY-019 — Ashby Connector** — **complete, 100%**, `AshbyConnector`
+  created — a real connector against Ashby's public, unauthenticated Job
+  Board API, no pagination needed, zero new error classes, conservative
+  field mapping with nothing fabricated (proven via a dedicated 13-field
+  missing-optional-fields test). Genuinely Ashby-specific field mapping not
+  possible for Greenhouse: `workplaceType`→`work_mode` and
+  `employmentType`→`employment_type` (unrecognized → `None`/`"other"`
+  respectively), plus defensive `isListed: false` exclusion. Verified both
+  offline (29 mocked tests routed through a **real**
+  `PolicyEnforcingHttpClient`) and via two manual live probes against
+  Ashby's own public careers board (62 real jobs) performed **before**
+  finalizing the field mapping — confirmed every planned field name and
+  value range exactly, with zero corrections needed. One honestly-flagged
+  gap: the live board had zero jobs with a populated `compensation` field,
+  so the "compensation present and parsed" code path is verified by a
+  hand-built fixture test, not live data (the "absent" path — this Story's
+  own named edge case — *was* confirmed live). Files:
+  `backend/app/connectors/ashby.py`,
+  `backend/tests/test_ashby_connector.py`; `README.md` updated. No changes
+  to any STORY-016/017/018 file.
+- **STORY-027 — Data Quality Validation** — **complete, 100%**,
+  `validate_record()`/`validate_batch()` created in the new
+  `app/validation/` package — pure-function validation of
+  `NormalizedJobRecord`s, enforcing `requirement.md`'s exact three literal
+  required fields (title, company, source_url), non-blocking warnings for
+  sanity-check issues, and zero issues for merely-absent optional fields
+  (per `requirement.md`'s own edge case, deliberately diverging from this
+  session's own prompt examples where they conflicted). The flagged
+  "company" resolution (record's own `company_name` OR a caller-supplied
+  `source_company_name`) was proven necessary and correct against
+  realistic Greenhouse/Ashby fixtures — both real connectors' output would
+  otherwise always hard-fail, since neither populates `company_name`.
+  `validate_batch()` proven to let one broken record coexist with valid
+  ones without blocking. Files: `backend/app/validation/data_quality.py`,
+  `backend/tests/test_data_quality_validation.py`; `README.md` updated. No
+  changes to `app/connectors/*`/`app/models/*`, no Alembic migration.
+- **STORY-025 — Exact Deduplication** — **complete, 100%**,
+  `upsert_job()`/`upsert_batch()` created in the new `app/ingestion/`
+  package — keyed strictly on `(source, source_job_id)`, the literal
+  identity requirement.md names (not a `source_id` FK, as this prompt's
+  own template illustratively suggested). Required **zero migration**:
+  the composite unique constraint and `content_hash`/`first_seen_at`/
+  `last_seen_at` all already existed since STORY-010 as declared-but-
+  unused schema hooks. The literal AC ("re-running a connector against
+  unchanged source data produces zero new job rows, updated
+  `last_seen_at`") was proven directly against real Postgres, not just
+  declared: first insertion created a row, an identical re-run left the
+  row count unchanged while advancing `last_seen_at`, a changed re-run
+  updated the same row, and the critical property — two records sharing
+  title/company/location under different `source` values are never
+  merged — was proven both at the pure-logic level and live (a real
+  `SELECT` confirmed 2 distinct rows). Content hashing (SHA-256 over
+  `json.dumps(..., sort_keys=True)`) deliberately excludes
+  `source_updated_at`/`raw_metadata` so neither can trigger a spurious
+  "changed" classification. Files: `backend/app/ingestion/dedup.py`,
+  `backend/tests/test_dedup.py`; `README.md` updated. No changes to
+  `Job`/any model, no changes to `app/connectors/*`/`app/validation/*`,
+  no Alembic migration.
+- **STORY-046 — SSRF Protection** — **complete, 100%**, `UrllibTransport`
+  replaced/renamed to `SsrfSafeTransport`: every destination (target URL,
+  robots.txt fetch, every redirect hop) validated via stdlib `ipaddress`
+  against loopback/RFC1918/link-local (incl. cloud metadata)/multicast/
+  reserved ranges before any socket opens, then connected directly to the
+  validated IP via custom `http.client.HTTPConnection`/`HTTPSConnection`
+  subclasses — closing the DNS-rebinding window by construction, not just
+  "revalidating." `PolicyEnforcingHttpClient` itself needed **zero**
+  changes. Exactly 1 new error class (`SsrfRejectedError`); DNS failure
+  deliberately stays a reused `ConnectorTransportError`. The literal AC
+  ("a crafted URL/redirect targeting a private IP range is rejected
+  before any request is made to it") was proven at both the unit-test
+  level (critical zero-network redirect test) and live: a real public API
+  still works, real loopback/cloud-metadata addresses rejected
+  pre-connection, and — an unplanned bonus — a real internal Docker
+  hostname (`postgres`) also correctly rejected, confirming the boundary
+  with the backend's own untouched, separate infrastructure connections.
+  Both Greenhouse and Ashby inherited full protection with **zero code
+  changes** — concrete proof of the "central enforcement point" design
+  goal, not just a claim. Files: `backend/app/connectors/http_client.py`,
+  `backend/app/connectors/errors.py` (+1 class),
+  `backend/tests/test_ssrf_protection.py`; `README.md` updated. No
+  changes to any model, no Alembic migration, no new runtime dependency
+  (stdlib `ipaddress`/`http.client`/`ssl`/`socket` only).
+- **STORY-022 — Retry Handling** — **complete, 100%**, `with_retry()`
+  created in the new `app/ingestion/retry.py` — bounded exponential
+  backoff + full jitter (injectable `random_func`), `Retry-After`-aware
+  429 handling bounded to `max_delay`, and an exception-type-plus-context
+  classification (`ConnectorTransportError`/`ConnectorRateLimitedError`
+  always retryable; `ConnectorSourceFormatError` retryable only if
+  `context["status_code"] >= 500`; every policy/security error never
+  retryable). Resolved the ambiguity that Greenhouse/Ashby's `fetch()`
+  raises the same exception class for both a 5xx and a malformed payload
+  by inspecting the already-present `status_code` context field — **zero
+  changes to either connector file**. One small, additive change to
+  `http_client.py` (added `retry_after` to `ConnectorRateLimitedError`'s
+  context). The critical test — every policy/security rejection results
+  in exactly one attempt, zero sleep calls — proven for all six such
+  error classes. Required **no live infrastructure at all** — the first
+  Story since STORY-016 with zero Docker/Postgres validation needed,
+  since every behavior (including the delay math itself) is exactly
+  unit-testable via injected `sleep`/`random_func`. Files:
+  `backend/app/ingestion/retry.py`, `backend/tests/test_retry.py`;
+  `backend/app/connectors/http_client.py`, `README.md` updated. No new
+  error classes, no changes to Greenhouse/Ashby/`base.py`/`registry.py`/
+  any model, no migration.
+- **STORY-020 — Future Connector Extensibility Guidelines** — **complete,
+  100%**, `docs/CONNECTOR_GUIDE.md` created — a documentation-only Story
+  (`requirement.md`'s own edge case: "N/A"), **zero code files touched**,
+  confirmed by an unchanged 257/257 test run before and after. Covers a
+  Source Onboarding Checklist, the real 14-step sequence, a
+  `BaseConnector` contract reference, explicit Network and Security Rules
+  (prohibited behaviors matching STORY-017/046's own boundaries),
+  Normalization Rules, a full Error Taxonomy table cross-checked against
+  the real `is_retryable()` function, and Testing Guidelines citing the
+  real Greenhouse/Ashby test files as the template — every cited class/
+  module/function name grep-verified against actual source, zero drift
+  found. One inline markdown code example used instead of a separate
+  template file (approved, flagged decision — avoids drift/mistaken-
+  identity risk a real scaffold file would carry). Files:
+  `docs/CONNECTOR_GUIDE.md`; `README.md` (one new linking paragraph),
+  `progress.md` updated.
+- **STORY-029 — Provenance Preservation** — **complete, 100%**, a
+  surgical fix to `upsert_job()`'s UPDATE path — `source_url`/
+  `application_url`/`raw_metadata`/`source_updated_at` are never
+  regressed to `None` by a later observation that lacks them (the
+  Story's own literal edge case), while ordinary content fields keep
+  STORY-025's original full-overwrite behavior. Every field STORY-029's
+  literal text names already existed on `Job` since STORY-010 — **zero
+  migration**. No `Job.source_id` FK, no `IngestionRun` linkage, no
+  historical/snapshot table — all three explicitly considered and
+  rejected, none named in the literal text. Confirmed via STORY-034's own
+  `Dependencies: STORY-013, STORY-029, STORY-047` line that the AC's "UI
+  surfaces 'view original posting'" wording is STORY-034's future
+  responsibility, not built here. Files: `backend/app/ingestion/dedup.py`,
+  `backend/tests/test_dedup.py` (+10 tests, plus a minimal `_FakeSession`
+  exercising the real `upsert_job()` UPDATE logic with zero real database
+  access); `README.md` updated. No model changes, no Alembic migration.
+- **STORY-057 — Database Indexing Strategy** — **complete, 100%**, 5 new
+  indexes added to `Job`: partial B-tree `ix_jobs_work_mode`/
+  `ix_jobs_employment_type` (excluding NULL — Greenhouse never populates
+  either field), composite B-tree `ix_jobs_location_country_region_city`
+  (broadest-to-narrowest, serves hierarchical drill-down), B-tree
+  `ix_jobs_posting_date` (serves STORY-032's "newest first" sort), and GIN
+  expression index `ix_jobs_search_vector` over exactly STORY-030's literal
+  title/company/description/skills full-text field list. The exact-dedup
+  `(source, source_job_id)` UNIQUE constraint and `company_id`'s existing FK
+  index were confirmed, not duplicated. No "open/active jobs" partial index
+  — `Job` has no `status` column yet (STORY-028 unbuilt). No index added for
+  seniority/compensation/closing_date/last_seen_at/location_raw — none are
+  named by STORY-057's own literal text; a dedicated regression test
+  (`test_no_index_added_for_fields_outside_story_057_literal_scope`) guards
+  against silent scope creep on those columns going forward.
+  **Implementation discovery** (not part of the original plan, resolved
+  in-place as a necessary implementation detail rather than a scope
+  change): Postgres marks both `to_tsvector()` overloads AND
+  `array_to_string()` only `STABLE`, not `IMMUTABLE` — confirmed via two
+  separate failed `CREATE INDEX` attempts against the real database — so
+  `CREATE INDEX` categorically rejected the direct expression. Fixed via
+  `jobs_search_vector_english(title, company, description, skills)`, a
+  small custom SQL function the migration creates and marks `IMMUTABLE`
+  itself (the standard, documented Postgres workaround — Postgres trusts a
+  function's declared volatility rather than inspecting what it calls
+  internally; safe here because the language config `'english'` is a
+  hardcoded literal, never a column value). Migration hand-written per the
+  plan (autogenerate has no concept of creating a SQL function), though
+  autogenerate did correctly detect all 5 index diffs once the model was
+  updated. `alembic check` initially reported a spurious diff on the GIN
+  expression (a known Alembic limitation for expression indexes — Postgres
+  reflects the catalog expression with explicit `::text`/`::text[]` casts
+  the raw model text omitted); fixed by matching the model's expression
+  text to Postgres's own canonical form, `alembic check` now reports "No
+  new upgrade operations detected." Verified via real Postgres: `\d jobs`
+  catalog inspection (all 5 new + all 3 pre-existing indexes present, none
+  duplicated), full `downgrade -1` (confirmed exactly the 3 original
+  indexes and zero functions remain) then re-`upgrade head` (confirmed
+  clean re-apply, final head `4a2ec55ea99c`), and `EXPLAIN`/`EXPLAIN
+  ANALYZE` against ~5,000 rows of temporary synthetic data (generated,
+  queried, then deleted — never committed): `work_mode`, `employment_type`,
+  the location composite, and `posting_date` queries each used their
+  intended index automatically; the full-text query's planner chose a
+  sequential scan at this row count/selectivity (expected planner
+  behavior, not a defect — matches the Story's own explicit warning not to
+  judge an index broken from a small table), confirmed usable via a
+  diagnostic-only `SET LOCAL enable_seqscan = off` run inside a rolled-back
+  transaction, which showed a Bitmap Index Scan on `ix_jobs_search_vector`.
+  Real `jobs` table confirmed empty (0 rows) after cleanup, before
+  `docker compose down -v`. One pre-existing test needed the same
+  mechanical update this repo has needed four times before (STORY-009→010→
+  011→014→015, now →057): `test_head_revision_is_the_ingestion_runs_table_migration`
+  renamed to `test_head_revision_is_the_add_job_indexes_migration` in
+  `backend/tests/test_alembic.py`, asserting the new head's doc string
+  instead. Files created: `backend/alembic/versions/4a2ec55ea99c_add_job_indexes.py`,
+  `backend/tests/test_job_indexes.py` (10 new tests). Files modified:
+  `backend/app/models/job.py` (5 new `Index()` declarations in
+  `__table_args__`), `backend/tests/test_alembic.py` (1 test renamed/
+  updated), `progress.md`. Test suite: 277/277 passing (267 pre-existing +
+  10 new). No changes to `app/connectors/*`, `app/ingestion/*`,
+  `app/validation/*`, or any other model.
+- **STORY-030 — Full-Text Search** — **complete, 100%**, `search_jobs(session,
+  query, *, limit, offset)` in the new `app/search/service.py`: builds a
+  `websearch_to_tsquery('english', query)` (chosen over `plainto_tsquery`/
+  `phraseto_tsquery`/`to_tsquery` — purpose-built for raw, error-tolerant
+  user search-box input) filtered via `@@` against `jobs_search_vector_english()`
+  (STORY-057's exact index expression, same 4 arguments/order, so
+  PostgreSQL's planner recognizes `ix_jobs_search_vector`), ranked via
+  `ts_rank_cd()` (no field weighting — matches the existing, unweighted
+  index expression; the Story's own AC requires "ranked above irrelevant,"
+  so ranking lives here, not STORY-032), with `posting_date DESC, id ASC`
+  as a deterministic tie-break. Empty/whitespace query returns unfiltered,
+  `posting_date`-sorted results (the Story's own literal edge case);
+  punctuation-only input (e.g. `"???"`) is treated identically via a
+  `_has_search_terms()` regex guard — a flagged, deliberate extension,
+  independently confirmed against real Postgres: `websearch_to_tsquery('english',
+  '???')` itself returns an empty tsquery, matching the code's own
+  behavior. New `GET /jobs/search` endpoint (`app/api/search.py`) —
+  `q`/`limit` (1-100, default 20)/`offset` (>=0, default 0), inline
+  `JobSearchResult`/`JobSearchResponse` Pydantic models (deliberately
+  minimal search-result fields; no `description_full`/`raw_metadata`/
+  `content_hash`/internal timestamps, no `total_count` — flagged judgment
+  calls). New `get_db()` FastAPI dependency in `app/db.py` — the first
+  route in the repository wired to the database. Query safety: the search
+  string is always SQLAlchemy-bound, never interpolated — proven both by
+  an offline compiled-SQL test with an adversarial input and, live, by
+  confirming `'; DROP TABLE jobs; --`-style input is treated as inert
+  search text (zero matches, table intact, row count unchanged).
+  **Deterministic real-Postgres validation** (temporary fixture rows,
+  never committed, matching the STORY-018/019/046/057 precedent and this
+  repo's own stated STORY-054 boundary that live-DB *integration-test
+  infrastructure* isn't built yet): exact keyword, title-only, company-only,
+  description-only, and skills-only matches each individually confirmed;
+  no-match case confirmed empty; case-insensitivity confirmed identical
+  result sets for `"ENGINEER"`/`"engineer"`; English stemming confirmed
+  (`"running"` matched a `"Runner Coach"` fixture); `"C++"`/`"R&D"` punctuation
+  handled without error; a row with `company_name`/`description_full`/
+  `skills` all `NULL` still matched on title alone; duplicate-term input
+  (`"engineer engineer"`) produced the same result set as the single term
+  (observed and documented, not special-cased). One real finding worth
+  recording: `"engineer"` and `"engineering"` share the same English stem
+  (`engin`) in Postgres — a query for one legitimately matches the other;
+  an initial test assumption to the contrary was wrong and corrected, not
+  the implementation. `EXPLAIN` run at both a small (8-row) deterministic
+  scale and a larger (~5,000-row) synthetic scale (reusing STORY-057's
+  method): the planner chose a sequential scan at both scales for this
+  term selectivity/table size (expected, cost-based, non-defect behavior —
+  same phenomenon STORY-057 already documented); a diagnostic-only `SET
+  LOCAL enable_seqscan = off` (rolled back) confirmed `ix_jobs_search_vector`
+  is structurally valid and usable via a Bitmap Index Scan. `alembic check`
+  confirmed **zero schema drift** — no migration in this Story, since the
+  index already existed. Files created: `backend/app/search/__init__.py`,
+  `backend/app/search/service.py`, `backend/app/api/search.py`,
+  `backend/tests/test_search_service.py` (17 tests),
+  `backend/tests/test_search_api.py` (10 tests). Files modified:
+  `backend/app/db.py` (+`get_db()`), `backend/app/main.py` (router wired
+  in), `README.md`, `progress.md`. Test suite: 304/304 passing (277
+  pre-existing + 27 new). No changes to `Job`/any model, no changes to
+  `app/connectors/*`/`app/ingestion/*`/`app/validation/*`, no Alembic
+  migration.
+- **STORY-033 — Pagination** — **complete, 100%**, offset-based pagination
+  chosen deliberately over cursor/keyset — `requirement.md`'s own literal
+  text leaves the choice to implementation, only *prefers* cursor "if
+  feasible within timeline," and its own edge case text is written
+  specifically to pre-clear the offset choice ("documented as an accepted
+  limitation if offset-based pagination is used"). Keyset was explicitly
+  considered and rejected: `ts_rank_cd()` is a runtime-computed float with
+  no supporting index, so keyset's usual justification (an index-
+  accelerated seek) doesn't apply to the ranked branch, and a dual-mode API
+  (keyset for one branch, offset for the other) wasn't justified by
+  anything in the literal text. `search_jobs()` itself is **unchanged** —
+  all 17 STORY-030 tests still pass unmodified; pagination metadata is
+  computed entirely in `app/api/search.py` via an over-fetch-by-one trick
+  (`search_jobs(..., limit=limit+1, ...)`, then `has_next = len(jobs) >
+  limit`, slicing the extra row off) — avoids a second `COUNT(*)` query
+  that would re-evaluate the same search predicate a second time; no
+  `total` count field added (not required by the literal AC, and no
+  Story requests one). `has_previous` computed trivially from `offset >
+  0`, no query needed. Stability was already sufficient before this
+  Story — `id ASC` was already the unconditional final tie-break in both
+  of `search_jobs()`'s branches (verified by direct re-read, not assumed)
+  — so no new tie-break was added. Response envelope
+  (`JobSearchResponse`) was **already an object, not a bare array**
+  (confirmed by direct re-read of the STORY-030 code before assuming
+  otherwise) — adding `has_next`/`has_previous` as two new sibling fields
+  is purely additive, **not a breaking API change**. `limit`/`offset`
+  bounds (default 20, max 100, min 1; offset min 0) are unchanged from
+  STORY-030 — no new validation needed, already tested. No new index —
+  none required; `ix_jobs_posting_date`/the PK already served the
+  unfiltered branch before this Story, and the ranked branch was never
+  index-backed for its `ORDER BY` regardless of pagination style.
+  **Deterministic real-Postgres validation** (temporary fixture rows,
+  never committed, same STORY-018/019/046/057/030 precedent — live-DB
+  integration-test *infrastructure* remains STORY-054's territory): a
+  26-row unfiltered fixture set (including one row with `NULL
+  posting_date`) and a 22-row ranked/filtered fixture set, both paged
+  through in full via the same over-fetch-by-one logic the real API uses
+  — for both branches, the concatenation of every page's ids exactly
+  matched a single unpaginated baseline query's full order, with **zero
+  duplicates and zero missing rows**; the `NULL`-`posting_date` row
+  appeared exactly once; offset beyond the total row count returned an
+  empty page; empty-query and punctuation-only-query pagination produced
+  identical page-2 results (confirming STORY-030's existing equivalence
+  holds under pagination too); `has_next`/`has_previous` spot-checked
+  correct across first/middle/last pages of a 22-row set with `limit=5`
+  (4 full pages plus one partial page of 2, `has_next` correctly `False`
+  only on the last). Files created: none. Files modified:
+  `backend/app/api/search.py` (+`has_next`/`has_previous` fields,
+  over-fetch-by-one logic, expanded docstring documenting the accepted
+  offset-pagination limitation), `backend/tests/test_search_api.py` (9
+  new tests, 1 existing test updated for the `limit+1` over-fetch),
+  `README.md`, `progress.md`. Test suite: 313/313 passing (304
+  pre-existing + 9 new). No changes to `app/search/service.py` (all 17
+  STORY-030 tests unmodified and still passing), no changes to `Job`/any
+  model, no Alembic migration.
+- **STORY-031 — Faceted Filtering** — **complete, 100%**, 7 optional,
+  repeatable query params added to `GET /jobs/search` and 7 matching
+  keyword-only parameters added to `search_jobs()` — `work_mode`,
+  `employment_type`, `seniority`, `company`, `location_country`,
+  `location_region`, `location_city` — covering exactly the 5 dimensions
+  STORY-031's own literal user story names (location, remote status,
+  employment type, seniority, company), deliberately **not** an
+  open-ended field list, since the Story's own technical note calls for
+  an "allow-list of filterable fields." **Real finding, flagged and
+  acted on**: `Job.company_id` is never populated by any ingestion code
+  path (confirmed via grep — `app/ingestion/dedup.py`'s own docstring
+  states `upsert_job()` "never touch[es] `Job.company_id`") — filtering
+  by it would match zero real jobs today, so the `company` filter targets
+  `company_name` instead. Semantics: `work_mode`/`employment_type` are
+  exact-equality-matched against the existing `WorkMode`/`EmploymentType`
+  enums already defined in `app/models/job.py` (no new allow-list
+  invented; FastAPI 422s on any value outside them). `seniority`/
+  `company` use case-insensitive matching (`func.lower()` on both sides)
+  since neither has a supporting index either way, so insensitivity costs
+  nothing. Location filters are deliberately **case-sensitive** — a
+  flagged, explained asymmetry: `ix_jobs_location_country_region_city`
+  (STORY-057) is a plain B-tree over the raw column values, and wrapping
+  the column in `func.lower()` would defeat that index by turning it into
+  an expression the index doesn't store. Different filter types AND;
+  multiple values within one filter OR (`Column.in_(values)`) — matches
+  the literal AC's own composition example. All values SQLAlchemy-bound,
+  never interpolated. No facet-value/count endpoint built — no literal
+  AC requires one. No new index — none required for correctness; the
+  Index Compatibility table drafted in the approved plan was **verified
+  exactly correct** against real Postgres (see below). **Deterministic
+  real-Postgres validation** (temporary fixture rows, never committed,
+  same established precedent): a 48-row fixture set with deliberately
+  varied `work_mode`/`employment_type`/`seniority`/`company_name`/
+  location values, including Greenhouse-shaped `NULL work_mode`/
+  `employment_type` rows (12 of 48) — each of the 5 filter families
+  individually narrowed results correctly; the literal AC verified
+  directly (`count(A ∧ B) ≤ count(A)`, `≤ count(B)`, and exactly equal to
+  the independently-computed true intersection: 12 = 12 = 12 in the
+  tested case); multi-value OR-within-filter returned the exact expected
+  union (24 = 24); a zero-match filter combination returned an empty list
+  with no error (the literal edge case); keyword search + filters
+  composed correctly; NULL `work_mode` rows correctly excluded from every
+  specific-value `work_mode` filter; a SQL-injection-style `company`
+  filter value (`'; DROP TABLE jobs; --`) matched zero rows and left the
+  table intact (48 rows, unchanged); a full page-walk of a filtered
+  result set (12 rows, `limit=5`, 3 pages) produced zero duplicates and
+  exactly 12 unique ids; offset beyond the filtered count returned empty.
+  **`EXPLAIN` confirmed every prediction in the plan's Index Compatibility
+  table exactly**: `work_mode`/`employment_type` filters each used their
+  STORY-057 partial index (`Index Scan using ix_jobs_work_mode`/
+  `ix_jobs_employment_type`); `location_country` alone used
+  `ix_jobs_location_country_region_city` (`Index Scan`); `location_region`
+  filtered **alone** (no `location_country`) correctly fell back to a
+  `Seq Scan` — the documented, accepted composite-index leading-column
+  limitation, not a defect. Files created: none. Files modified:
+  `backend/app/search/service.py` (+7 filter params, no change to
+  existing branch/ordering logic), `backend/app/api/search.py` (+7 query
+  params, `WorkMode`/`EmploymentType` reused from `app.models.job`),
+  `backend/tests/test_search_service.py` (18 new tests),
+  `backend/tests/test_search_api.py` (9 new tests, all pre-existing fake
+  `search_jobs` signatures updated to accept `**kwargs`), `README.md`,
+  `progress.md`. Test suite: 340/340 passing (313 pre-existing + 27 new).
+  No changes to `Job`/any model, no Alembic migration.
+- **STORY-032 — Sorting** — **complete, 100%**, a new `SortMode` enum
+  (`relevance`/`posting_date`/`last_seen`) and a `sort` keyword-only
+  parameter added to `search_jobs()`, plus a matching `sort` query param
+  on `GET /jobs/search` — covering exactly the 3 dimensions the Story's
+  own functional requirements name, at minimum, no ascending/"oldest"
+  direction (not named or exemplified). `search_jobs()` was restructured
+  so the `@@` search-match predicate is built independently of the
+  ordering decision — an explicit `sort=posting_date`/`sort=last_seen`
+  still filters by a real keyword query, only changing the order, not
+  what matches (the Story's own "sorting changes ordering, not matching"
+  requirement, verified directly). `sort=None`/`sort=relevance` reproduce
+  the exact pre-STORY-032 default (`ts_rank_cd` when a query is present,
+  else newest-first) byte-for-byte — regression-confirmed via a direct
+  compiled-SQL equality test. `sort=relevance` requested without a
+  meaningful query (empty/whitespace/punctuation-only) gracefully falls
+  back to the same newest-first ordering rather than erroring, matching
+  this codebase's consistent edge-case philosophy (STORY-030/031's own
+  precedents). **Flagged decision, acted on and empirically verified**:
+  `posting_date DESC` now uses an explicit `NULLS LAST` (undated jobs
+  sink to the bottom of "newest first" rather than appearing to be the
+  newest) — a real, deliberate change from Postgres's previous implicit
+  default (`NULLS FIRST`), required by the Story's own edge case
+  ("defines and documents NULL ordering"). `last_seen_at` needed no NULL
+  decision — confirmed `nullable=False` by direct model re-read. **Real,
+  honest finding from `EXPLAIN` at both a 15-row deterministic fixture
+  scale and a ~5,000-row synthetic scale**: `ix_jobs_posting_date` cannot
+  serve `ORDER BY posting_date DESC NULLS LAST, id ASC` at all — confirmed
+  structurally incompatible, not just cost-deprioritized: even with
+  `enable_seqscan = off` forced (a massive artificial cost penalty), the
+  planner still chose a `Seq Scan` + explicit `Sort` over using the index.
+  For comparison, `DESC NULLS FIRST` (the index's native backward-scan
+  order) gets an efficient `Index Scan Backward` with `Incremental Sort`.
+  This is a real, measured cost of the `NULLS LAST` decision — but a small
+  one at any realistic scale (`Sort` cost ≈ 81 for 5,000 rows) and doesn't
+  affect correctness, so the decision stands as planned; flagged here for
+  visibility rather than silently absorbed. No new index added — none
+  proposed or required; this is reported as an honest tradeoff, not a
+  defect requiring a fix. `last_seen_at` has no index either way,
+  consistent with STORY-057's own explicit prior deferral of that field.
+  Filters (STORY-031) and pagination (STORY-033) compose with every sort
+  mode unchanged — proven, not assumed: real-Postgres deterministic fixture
+  tests with intentional value ties (rows sharing an identical
+  `posting_date` and rows sharing an identical `last_seen_at`) confirmed
+  the `id ASC` final tie-break alone resolves them deterministically and
+  reproducibly, and a full page-walk under all 3 sort modes produced zero
+  duplicates and zero missing rows against a 15-row fixture set (4 pages
+  each). Files created: none. Files modified: `backend/app/search/service.py`
+  (+`SortMode` enum, +`sort` param, WHERE/ORDER BY decoupled),
+  `backend/app/api/search.py` (+`sort` query param), `backend/tests/test_search_service.py`
+  (16 new tests), `backend/tests/test_search_api.py` (8 new tests),
+  `README.md`, `progress.md`. Test suite: 364/364 passing (340
+  pre-existing + 24 new). No changes to `Job`/any model, no Alembic
+  migration, no new index.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017
-are done — **17 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/022/025/027/029/030/031/032/033/046/057
+are done — **30 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
-- **STORY-018 — Greenhouse Connector** and **STORY-019 — Ashby Connector**
-  (both P1) are now the highest-priority genuinely-unblocked Stories: both
-  Dependencies (STORY-016 ✅, STORY-017 ✅) are complete for each. These
-  are the first real connectors — implementing STORY-016's interface
-  against each ATS's public, unauthenticated job board API, routed through
-  STORY-017's `PolicyEnforcingHttpClient`.
+- **STORY-035 — Job Search UI** — Dependencies are `STORY-013 ✅,
+  STORY-030 ✅, STORY-031 ✅, STORY-032 ✅, STORY-033 ✅` (confirmed by
+  direct re-read of `requirement.md`) — **all five now met. STORY-035 is
+  fully Ready** — the last unmet dependency (STORY-032) was cleared this
+  run.
+- **STORY-058 — Caching Strategy** (P2) remains Ready (STORY-008 ✅,
+  STORY-030 ✅) — unaffected directly by STORY-032.
+- **STORY-039 — Saved Searches** depends on STORY-036, STORY-031 ✅ — not
+  STORY-032 — unaffected directly; still Blocked on STORY-036, not yet
+  built.
+- **STORY-026 — Advanced/Cross-Source Deduplication** (P3) remains Ready
+  (STORY-025 ✅, STORY-018 ✅, STORY-019 ✅) but is explicitly the lowest
+  priority among currently-Ready Stories.
+- Other genuinely-Ready Stories, all P1/P2: **STORY-035** (Job Search UI,
+  P1, newly Ready — see above), **STORY-043** (Security Hardening, P1),
+  **STORY-045** (Rate Limiting, P1), **STORY-052** (Health Checks, P1),
+  **STORY-054** (Automated Testing Strategy, P1), **STORY-049** (Responsive
+  UI, P2), **STORY-050** (Structured Logging, P2), **STORY-055** (Backups,
+  P2).
 
-Also unblocked, lower priority or thinner scope right now: STORY-046 (SSRF
-Protection, P1 — depends on STORY-017 ✅), STORY-022 (Retry Handling, P1),
-STORY-025 (Exact Deduplication, P1), STORY-027 (Data Quality Validation,
-P1), STORY-029 (Provenance Preservation, P1), STORY-057 (Database Indexing
-Strategy, P1), STORY-043 (Security Hardening, P1), STORY-045 (Rate
-Limiting, P1), STORY-049 (Responsive UI, P2), STORY-050 (Structured
-Logging, P2), STORY-052 (Health Checks, P1), STORY-054 (Automated Testing
-Strategy, P1), STORY-055 (Backups, P2).
-
-**Not yet approved for implementation** — nothing beyond STORY-017 has been
+**Not yet approved for implementation** — nothing beyond STORY-032 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.
