@@ -1,0 +1,218 @@
+/* STORY-035: plain CSS, no framework -- mobile-first (STORY-049's own
+   technical note), a restrained neutral palette, and visible focus states
+   throughout (never suppressed) as an accessibility baseline (STORY-048's
+   territory to verify fully, not claimed complete here). */
+
+:root {
+  --color-bg: #ffffff;
+  --color-text: #1a1a1a;
+  --color-muted: #5a5a5a;
+  --color-border: #d8d8d8;
+  --color-accent: #1d4ed8;
+  --color-accent-contrast: #ffffff;
+  --color-surface: #f7f7f8;
+  --color-error: #b91c1c;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --radius: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  line-height: 1.5;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-3);
+}
+
+h1 {
+  font-size: 1.5rem;
+  margin: 0 0 var(--space-3);
+}
+
+h2,
+legend {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* Visible focus everywhere -- never suppressed. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+label {
+  display: block;
+  font-size: 0.875rem;
+  margin-bottom: var(--space-1);
+}
+
+input[type="search"],
+input[type="text"],
+select {
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 1rem;
+  margin-bottom: var(--space-3);
+}
+
+button {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.9rem;
+  cursor: pointer;
+  min-height: 44px; /* touch target */
+}
+
+button:hover:not(:disabled) {
+  background: var(--color-border);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.search-form button[type="submit"] {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  border-color: var(--color-accent);
+}
+
+fieldset {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+
+fieldset label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.9rem;
+  margin-bottom: var(--space-2);
+}
+
+fieldset input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.results {
+  margin-top: var(--space-4);
+  min-height: 4rem;
+}
+
+.results [role="alert"] {
+  color: var(--color-error);
+}
+
+.job-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.job-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  overflow-wrap: break-word;
+}
+
+.job-card__title {
+  margin: 0 0 var(--space-1);
+  font-size: 1.1rem;
+}
+
+.job-card__company {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+.job-card__location,
+.job-card__date {
+  margin: 0 0 var(--space-1);
+  font-size: 0.9rem;
+  color: var(--color-muted);
+}
+
+.job-card__tags {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+  padding: 0;
+}
+
+.job-card__tag {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 2px var(--space-2);
+  font-size: 0.8rem;
+}
+
+.job-card__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
+}
+
+nav[aria-label="Pagination"] {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+/* Mobile-first: from here up, widen the filter layout. */
+@media (min-width: 768px) {
+  main {
+    padding: var(--space-4);
+  }
+
+  section[aria-label="Filters"] {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-3);
+  }
+}
