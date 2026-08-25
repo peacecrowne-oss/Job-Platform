@@ -1,10 +1,20 @@
 # Development/test dependencies. Installs runtime dependencies too.
 -r requirements.txt
 
-pytest==8.3.4
+pytest==9.0.3
 httpx==0.28.1
 # Dependency vulnerability scanning (STORY-043). Run: pip-audit
 pip-audit==2.10.1
 # STORY-054: diagnostic coverage reporting only -- no --cov-fail-under gate,
 # since the Story's own literal AC doesn't specify a threshold.
 pytest-cov==6.0.0
+# STORY-053: none of pip/setuptools/wheel below are project dependencies --
+# each is pinned defensively because it's a Python-install-bundled build
+# tool whose default version has known vulnerabilities (pip-audit,
+# confirmed reproducible in both a fresh local venv and a fresh Docker
+# container -- different bundled defaults, same category of finding).
+# Pinning here forces known-good versions regardless of what a given
+# Python install happens to bundle.
+setuptools>=78.1.1
+pip>=26.2
+wheel>=0.46.2

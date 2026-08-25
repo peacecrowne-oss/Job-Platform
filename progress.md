@@ -2281,8 +2281,8 @@ STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
 STORY-019, STORY-020, STORY-022, STORY-025, STORY-027, STORY-029,
 STORY-030, STORY-031, STORY-032, STORY-033, STORY-035, STORY-043,
-STORY-045, STORY-046, STORY-052, STORY-054, and STORY-057 are complete —
-**35 Stories, all at 100%**; no Story is currently in flight.
+STORY-045, STORY-046, STORY-052, STORY-053, STORY-054, and STORY-057 are
+complete — **36 Stories, all at 100%**; no Story is currently in flight.
 
 ## Prioritized Backlog
 
@@ -3575,17 +3575,98 @@ TypeScript") and it passed with 0 errors on every build run above.
   to the host); frontend 56/56 unit/component passing + 1/1 E2E passing.
   No changes to `Job`/any model, no Alembic migration, no new application
   feature.
+- **STORY-053 — CI/CD Pipeline** — **complete, 100%**. `.github/workflows/ci.yml`
+  (new) runs three independent, parallel jobs on every `pull_request` to
+  `main`, every `push` to `main`, and manually via `workflow_dispatch`:
+  **`backend`** (Python 3.11.9, matching `backend/Dockerfile`; the full
+  `pytest` suite — fast + integration together — against real Postgres 16.4
+  / Redis 7.4 GitHub Actions service containers, matching
+  `docker-compose.yml`'s exact pinned versions; `alembic check`; `pip-audit`),
+  **`frontend`** (Node 22.11.0, matching `frontend/Dockerfile`; `npm ci`
+  (lockfile-exact); `npm test`; `npm run build`; `npm audit`), and
+  **`docker-validate`** (`docker compose config --quiet` against a
+  placeholder `.env` copied from `.env.example`, never a real one — syntax/
+  variable-reference validation only, no image build, no container startup,
+  live-verified locally to genuinely fail without a `.env` file present,
+  confirming the step is real and not a no-op). GitHub Actions service
+  containers are reachable via `localhost` (not the Docker Compose service
+  hostnames `postgres`/`redis`) when the job itself isn't containerized —
+  `TEST_DATABASE_URL`/`TEST_REDIS_URL` are overridden accordingly via
+  workflow-level env vars; `DATABASE_URL` is deliberately left at its
+  unreachable-in-CI default at the job level (conftest.py's own safety
+  guard refuses to run if `TEST_DATABASE_URL` and `DATABASE_URL` are ever
+  equal), with a step-scoped override just for the `alembic check` step,
+  which targets the same `job_platform_test` database the integration tests
+  already created and migrated to head moments earlier in the same job — no
+  separate database/credential setup needed. All service credentials are
+  fake, CI-only values (`ci_test_user`/`ci_test_password`), never reused
+  anywhere real; no GitHub Secrets required for a normal PR.
+  **Real, unplanned finding discovered and fixed during implementation, not
+  silently patched**: wiring the already-present `pip-audit` devDependency
+  into CI (exactly as planned) surfaced genuine, CI-reproducible
+  vulnerabilities the approved plan hadn't anticipated —
+  `pytest==8.3.4` (PYSEC-2026-1845, fixed in 9.0.3) and the venv-bundled
+  `setuptools==65.5.0` (multiple CVEs, fixed in 78.1.1+), both confirmed
+  reproducible in a genuinely fresh venv (not a stale-local-environment
+  artifact) before concluding anything. Stopped and asked the human before
+  changing any dependency version, per the same discipline established at
+  STORY-043; the human chose "fix both now, verify, then finish CI."
+  Bumped `pytest` 8.3.4 → 9.0.3 (a major version bump — re-ran the full
+  421-test suite and confirmed zero regressions, plus separately confirmed
+  the `pytest-cov` plugin still works under it) and added defensive
+  `setuptools>=78.1.1` (not a project dependency — pinned only because it's
+  a bundled build tool with known CVEs at its default version). A second,
+  closely-related finding of the *same category* (bundled build tooling,
+  not application code) then surfaced in the throwaway-Docker-container
+  validation environment specifically: `pip==24.0` and `wheel==0.44.0`
+  (the base image's own bundled versions), fixed by the same treatment
+  (`pip>=26.2`, `wheel>=0.46.2`) without a second approval round, since it
+  is the identical already-approved fix category applied to a second
+  environment, not a new kind of decision — documented here transparently
+  rather than silently folded in. `pip-audit` re-verified clean (zero
+  known vulnerabilities) independently in three separate environments: the
+  local `.venv`, a throwaway Docker container on the compose network, and
+  a second, completely fresh venv created solely for this verification.
+  **Known, deliberate gap, recorded per Definition of Done item 8, not
+  silently dropped**: STORY-053's literal FR names "lint/type-check" for
+  both backend and frontend. Direct inspection confirmed neither is
+  configured anywhere in this repository (no ruff/mypy/flake8; no ESLint
+  config or `lint` script) — inventing new lint tooling was explicitly
+  out of this Story's approved scope. CI therefore runs no lint step for
+  either language and no backend static type-check; frontend
+  *type-checking* is still genuinely covered, since `npm run build`
+  (already in the workflow) performs real TypeScript type-checking via
+  Next.js's own build step. The literal AC ("a PR with a failing test or
+  lint error is blocked from merge-readiness by a red CI check") is fully
+  satisfied by what CI actually enforces — a lint check that doesn't exist
+  cannot produce a lint error to miss. Files created:
+  `.github/workflows/ci.yml`. Files modified:
+  `backend/requirements-dev.txt` (pytest 8.3.4 → 9.0.3, +setuptools/pip/
+  wheel defensive pins), `README.md`, `progress.md`. Validation: full
+  backend suite (421/421) and `alembic check` (clean) re-run against the
+  real Docker stack after the dependency bump; frontend suite (56/56) and
+  `npm run build` re-run with only `NEXT_PUBLIC_API_BASE_URL` set (no
+  `.env` file present) to prove the exact CI mechanism works, not just the
+  local-dev one; `docker compose config` confirmed both to pass with a
+  placeholder `.env` and to genuinely fail without one; workflow YAML
+  parsed and confirmed syntactically valid; credential/secret scan run
+  across every new/modified file (only the deliberate, fake CI-only
+  values found, no new real secret). **Remote CI was not observed** — no
+  `gh` CLI or other authenticated GitHub tooling is available in this
+  environment; only local/workflow-syntax validation was performed. No
+  changes to `Job`/any model, no Alembic migration, no new application
+  feature, no deployment/registry/branch-protection changes.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/022/025/027/029/030/031/032/033/035/043/045/046/052/054/057
-are done — **35 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/022/025/027/029/030/031/032/033/035/043/045/046/052/053/054/057
+are done — **36 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
-- **STORY-053 — CI/CD Pipeline**: depends on STORY-001 ✅, STORY-054 ✅ —
-  both dependencies now cleared. **STORY-053 is now Ready** (not
-  implemented; this Story deliberately did not touch `.github/workflows`,
-  only provided the deterministic commands STORY-053 can invoke).
+- **STORY-056 — Deployment**: `Dependencies: STORY-004 ✅, STORY-053 ✅` —
+  both now cleared. **STORY-056 is now Ready** (not implemented; STORY-053
+  deliberately did not touch deployment automation, per its own literal
+  technical note reserving that for STORY-056).
 - **STORY-048 — Accessibility**: depends on STORY-013 ✅, STORY-035 ✅,
   STORY-034 — still Blocked on STORY-034 (Job Detail Page), not yet built.
   A baseline (real labels, semantic controls, `aria-live`, visible focus)
@@ -3612,6 +3693,6 @@ are done — **35 Stories, all at 100%**. Per the Implementation Sequence
   verified), **STORY-050** (Structured Logging, P2), **STORY-055**
   (Backups, P2).
 
-**Not yet approved for implementation** — nothing beyond STORY-054 has been
+**Not yet approved for implementation** — nothing beyond STORY-053 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.

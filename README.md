@@ -56,11 +56,17 @@
 > isolated `job_platform_test` database and Redis DB index for real
 > Postgres/Redis integration tests with safety guards against ever
 > targeting development data, and a first Playwright E2E test covering
-> the search flow against the real local stack) exist so far. No
-> connector-to-persistence orchestration or CI have been implemented yet —
-> nothing currently calls the upsert or the retry wrapper automatically
-> from a live source; the `jobs` table itself is empty again (validated
-> with real inserts during implementation, since removed). See
+> the search flow against the real local stack), and a CI pipeline
+> (STORY-053 — three parallel GitHub Actions jobs on every PR and push to
+> `main`: backend tests against real Postgres/Redis service containers plus
+> `alembic check` and `pip-audit`, frontend tests/build/`npm audit`, and a
+> `docker compose config` syntax check; lint/backend-type-check are a
+> documented, deliberate gap since neither is configured anywhere in this
+> repository) exist so far. No connector-to-persistence orchestration has
+> been implemented yet — nothing currently calls the upsert or the retry
+> wrapper automatically from a live source; the `jobs` table itself is
+> empty again (validated with real inserts during implementation, since
+> removed). See
 > [`progress.md`](progress.md) for the exact current state and
 > [`requirement.md`](requirement.md) for the full requirements and Story
 > backlog.
@@ -692,13 +698,49 @@ returns a real non-zero exit code, and the real `job_platform`
 database/Redis DB 0 confirmed untouched (row/key counts checked before and
 after) by every integration/E2E run including their own cleanup steps.
 
-**CI-ready, not CI itself**: `.github/workflows/` remains untouched — the
-commands above are what STORY-053 (not yet implemented) will invoke; no
-coverage percentage gate is enforced (`pytest-cov` is wired in
+No coverage percentage gate is enforced (`pytest-cov` is wired in
 diagnostically only, since STORY-054's own literal AC specifies none).
 
 Connectors are tested against recorded/mocked responses only; nothing here
 makes a live call to an external job source.
+
+## Continuous Integration
+
+**Implemented** (STORY-053): `.github/workflows/ci.yml` runs on every pull
+request targeting `main`, every push to `main`, and manually via
+`workflow_dispatch`. Three independent jobs run in parallel — a failing job
+is separately diagnosable from the others, and none swallow a failure
+(`|| true`/`continue-on-error` are never used):
+
+- **`backend`** — Python 3.11.9 (matching `backend/Dockerfile`), the full
+  `pytest` suite (fast + integration together) against real Postgres 16.4 /
+  Redis 7.4 GitHub Actions service containers (the same versions
+  `docker-compose.yml` pins), `alembic check` for migration/model drift, and
+  `pip-audit`.
+- **`frontend`** — Node 22.11.0 (matching `frontend/Dockerfile`), `npm ci`
+  (lockfile-exact, never `npm install`), `npm test`, `npm run build` (real
+  TypeScript type-checking via Next.js's own build step), and `npm audit`.
+- **`docker-validate`** — `docker compose config` against a placeholder
+  `.env` (copied from `.env.example`, never a real one) — syntax/variable-
+  reference validation only, no image build, no container startup.
+
+All service credentials in the workflow are fake, CI-only values, never
+reused anywhere real. No GitHub Secrets are required for a normal PR.
+
+**Known, deliberate gap**: this repository has no lint tooling configured
+for either language (no ruff/mypy/flake8, no ESLint config) — CI therefore
+does not run a lint step for either backend or frontend, and backend has no
+static type-checking. Frontend *type-checking* is still covered (via
+`next build`); frontend *lint* and all backend static analysis are not.
+Recorded as a Decision in `progress.md` rather than invented ad hoc — adding
+either is a small, separate, future change.
+
+**Required-check names**, for anyone configuring GitHub branch protection
+manually (not performed by this Story — no tooling here can make that
+remote change): `backend`, `frontend`, `docker-validate`.
+
+Local commands above (this section) reproduce every job's checks exactly —
+running them before pushing gives the same signal CI will.
 
 ## Connector principles
 
