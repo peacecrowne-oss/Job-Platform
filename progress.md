@@ -2326,7 +2326,10 @@ Per `requirement.md` §5 (Implementation Sequence for Claude), in order:
 23. Advanced deduplication and scaling — STORY-026, STORY-024, STORY-050, STORY-051,
     STORY-052, STORY-055, STORY-056, STORY-058, STORY-048, STORY-049, STORY-020
 
-Full Story ID list (58 total): STORY-001, STORY-002, STORY-003, STORY-004, STORY-005,
+Full Story ID list (61 total as of 2026-08-25 — STORY-059/060/061 added by a
+requirements-only update, see Decisions; the 58-total figure below is
+historical, from when this list was last written):
+STORY-001, STORY-002, STORY-003, STORY-004, STORY-005,
 STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018, STORY-019,
 STORY-020, STORY-021, STORY-022, STORY-023, STORY-024, STORY-025, STORY-026,
@@ -2334,7 +2337,7 @@ STORY-027, STORY-028, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033,
 STORY-034, STORY-035, STORY-036, STORY-037, STORY-038, STORY-039, STORY-040,
 STORY-041, STORY-042, STORY-043, STORY-044, STORY-045, STORY-046, STORY-047,
 STORY-048, STORY-049, STORY-050, STORY-051, STORY-052, STORY-053, STORY-054,
-STORY-055, STORY-056, STORY-057, STORY-058.
+STORY-055, STORY-056, STORY-057, STORY-058, STORY-059, STORY-060, STORY-061.
 
 ## Decisions
 
@@ -2347,6 +2350,28 @@ STORY-055, STORY-056, STORY-057, STORY-058.
   dev first, then data layer, ingestion, search, personalization, cross-cutting
   concerns). Implementation order is governed separately by the Implementation
   Sequence in `requirement.md` §5, not by ID order.
+- **2026-08-25 — Requirements-only update, nothing implemented**: three new Stories
+  were added to `requirement.md` — **STORY-059** (Resume Upload & Resume Document
+  Management, P2), **STORY-060** (Assisted / Automated Job Application Submission,
+  P3), **STORY-061** (Application Tracking & History, P3) — per explicit human
+  approval, following the full Phase-1-audit → plan → approval-gate workflow. Story
+  count: 58 → 61. No existing Story ID was renumbered; the only edit to an existing
+  Story's own content was extending **STORY-044**'s `Dependencies` field to add
+  STORY-059 (its deletion-cascade scope now explicitly covers uploaded resume files,
+  not just STORY-040's structured data). `requirement.md` §5's Implementation
+  Sequence groups 21–23 (none yet started) were renumbered to 21–25 to insert the new
+  Stories at their correct dependency position; groups 1–20 (completed/in-progress
+  work) were left byte-for-byte unchanged, verified via `git diff`. §6 Definition of
+  Done gained item 9, scoped specifically to Stories involving automated external
+  submission. §1.2 (source legality) and §1.3 (truthfulness) were referenced by the
+  new Stories, never altered — STORY-060 explicitly extends both to
+  application-submission endpoints, not just job-discovery ones, and its own
+  functional requirements prohibit CAPTCHA/anti-bot/auth bypass and any fabricated
+  screening-question answer, work history, salary history, visa/authorization status,
+  education, or similar. **No application code was written or modified** — this was a
+  `requirement.md`/`progress.md`-only change; STORY-059/060/061 remain entirely
+  unimplemented (0%). `requirement.md`: 50701 -> 61708 bytes, 982 -> 1131 lines,
+  sha256 `1580...` -> `5bd7...` (full hashes in the corresponding Run Summary).
 - **Note on STORY-045/046/047**: an earlier instruction in this session referred to
   STORY-045/046/047 as covering repository structure, `.gitignore`/`.env.example`, and
   `README.md`. In the finalized `requirement.md`, those IDs are instead assigned to

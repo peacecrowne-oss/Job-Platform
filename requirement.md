@@ -707,7 +707,7 @@ At minimum, a normalized job record must support:
   documented scope.
 - **Edge cases**: Deletion requests during an in-flight fit-analysis request are
   handled without leaving orphaned data.
-- **Dependencies**: STORY-036, STORY-037, STORY-040.
+- **Dependencies**: STORY-036, STORY-037, STORY-040, STORY-059.
 - **Priority**: P2
 
 #### STORY-045 — Rate Limiting
@@ -908,6 +908,146 @@ At minimum, a normalized job record must support:
 - **Dependencies**: STORY-008, STORY-030.
 - **Priority**: P2
 
+### Resume Management & Application Automation
+
+STORY-059 through STORY-061 are P2/P3, later-phase capabilities layered on top of the
+already-shipped P0/P1 core search and ingestion scope (§0 Product Purpose is unchanged
+by their addition). Neither Story weakens §1.2 (source legality) or §1.3 (truthfulness)
+— STORY-060 explicitly extends both to application-submission endpoints, not just
+job-discovery ones.
+
+#### STORY-059 — Resume Upload & Resume Document Management
+- **User story**: As a job seeker, I want to upload and manage my resume file so I have
+  a real document available to attach to applications, alongside my structured
+  experience profile (STORY-040).
+- **Functional requirements**: A visible "Upload Resume" control (file picker; drag-and-
+  drop where practical) in the authenticated UI; accepted formats PDF and DOCX at
+  minimum (plain text optionally accepted); server-enforced configurable maximum upload
+  size; replace or delete the current resume; support multiple stored resume versions
+  with exactly one marked active/current; view metadata (filename, upload timestamp,
+  file type, active status); extract text from the uploaded file for keyword/ATS-
+  oriented analysis and application-field assistance only.
+- **Technical notes**: Files stored in object/blob storage (never the Git repository,
+  never a large binary DB column), referenced by a generated storage key — never a
+  user-supplied filename/path. A relational metadata record (owner, filename, MIME
+  type, size, storage key, upload timestamp, active flag) tracks each upload; extracted
+  text, when retained, is stored separately and linked to its specific resume version.
+  Local development may use a documented local-filesystem storage adapter behind the
+  same interface. Parsing failures leave extracted text absent — never fabricated
+  (§1.3) — the original file remains available regardless. MIME-type and extension
+  validation, a malware-scan integration point (hook only — no scanner selected/
+  implemented here), no execution of uploaded content. No public URL by default; direct
+  object-storage access, if used, only via signed, time-limited, owner-scoped URLs.
+  Extracted text is never auto-committed into STORY-040's structured entries without
+  explicit per-field user review and approval, and is never used by STORY-041's fit-
+  analysis in place of STORY-040 data — preserving STORY-041's existing acceptance
+  criteria unchanged.
+- **Acceptance criteria**: An authenticated user can upload a valid PDF/DOCX and see it
+  listed with correct metadata; a resume is visible/operable only by its owner, no
+  cross-user access under any request path; unsupported formats, oversized files, and
+  corrupted/unreadable files are all rejected with a clear, non-crashing error and no
+  partial record left behind; extracted text is always traceable to a specific stored
+  file and never presented as user-approved structured data; a user can replace or
+  delete their resume, and deletion removes the stored file, not just the metadata row;
+  the UI exposes a clear "Upload Resume" action and a resume-management section.
+- **Edge cases**: A parsing failure on an otherwise-valid file preserves the file and
+  reports "text extraction unavailable" rather than blocking the upload or fabricating
+  content. Deleting the active resume while a STORY-060 application references it
+  doesn't leave that application pointing at a missing file — the application record
+  keeps its own point-in-time reference, per STORY-060's own audit-record requirement.
+- **Dependencies**: STORY-036.
+- **Priority**: P2
+
+#### STORY-060 — Assisted / Automated Job Application Submission
+- **User story**: As a job seeker, I want the platform to help complete and, where
+  explicitly permitted, submit supported job applications using my approved profile and
+  resume data, so I can reduce repetitive application work without anything being
+  submitted that I haven't approved or that isn't truthful.
+- **Functional requirements**: Three modes — `manual` (user follows `application_url`
+  externally; platform only tracks intent), `assisted` (platform pre-fills supported
+  fields from verified user data; user reviews and performs final submission),
+  `automated` (submits without a per-application review step, only when the target
+  source is on an explicit supported-integration allowlist, the source's terms permit
+  automated submission, all required fields are available from verified data, no
+  question needs guessing, and no CAPTCHA/anti-bot/unsupported-auth barrier is present —
+  any failing condition routes to `assisted` or `manual_required`, never a bypass). New
+  users default to `assisted`; automated mode requires explicit opt-in. A normalized
+  application profile draws contact fields from STORY-037, work authorization/
+  employment history/education/skills from STORY-040, the selected resume from
+  STORY-059, and cover-letter text only when user-supplied/approved. Screening
+  questions classify as automatically-answerable (only if backed by explicit stored
+  data), requires-review, or cannot-automate (CAPTCHA, unsupported assessment, open-
+  ended new-input questions, legally sensitive declarations, unsupported workflow) —
+  never a guessed answer in any category. A pluggable `ApplicationAdapter` abstraction
+  (new, separate from STORY-016's `BaseConnector`) handles per-source capability
+  detection, field mapping, resume attachment, validation, submission, and manual-
+  fallback URL — this Story defines the contract, not a working adapter for any
+  specific source. Every application produces a persistent record (application ID,
+  user ID, job ID, source, `application_url`, selected resume ID, mode, status,
+  timestamps, submission provider, external application ID when available, failure
+  category/summary) without storing full answer text unnecessarily. Statuses: `draft`,
+  `needs_review`, `ready`, `submitting`, `submitted`, `failed`, `manual_required`,
+  `cancelled`. Idempotency via a provider key where available plus a local duplicate-
+  application (same user + job) check with a user-visible warning; an ambiguous/
+  unknown result is never auto-resubmitted without checking provider/application state
+  first. Retries apply only to transient technical failures — never to CAPTCHA, auth/
+  authorization rejection, validation failure, explicit rejection, already-applied
+  responses, ToS restrictions, or unknown states. Submission automation obeys source/
+  provider rate limits in addition to this platform's own (STORY-045) — no bulk
+  behavior ignoring source restrictions. UI: an "Apply" action on job detail/search
+  (STORY-034/035) reflecting the applicable mode; pre-submission the user sees company,
+  title, selected resume, exact fields to be submitted, and unanswered questions; post-
+  submission, success/failure, timestamp, available confirmation, and next action if
+  manual completion remains required.
+- **Technical notes**: This Story defines the `ApplicationAdapter` contract and the
+  manual/assisted data-preparation flow only — a working per-source adapter is
+  separate, later work, exactly as STORY-016 separated the connector framework from
+  STORY-018/019. Governed by §1.2 (extended explicitly to application-submission
+  endpoints, not just job-discovery) and §1.3 (never fabricate work history, salary
+  history, visa/work authorization, citizenship, education, certifications,
+  demographic information, disability/veteran status, security clearances, years of
+  experience, achievements, or screening-question answers). All outbound submission
+  traffic reuses STORY-046's SSRF-safe transport and STORY-017's lawful-access
+  enforcement — no arbitrary user-controlled submission URL is ever fetched;
+  destinations are limited to a source/provider allowlist. Resume selection defaults
+  to the active resume (STORY-059) but the user may choose a different stored one per
+  application; this Story does not alter resume content.
+- **Acceptance criteria**: A supported, authorized source can complete an application
+  using only verified user data, with no fabricated answer anywhere. Any unsupported/
+  protected flow results in `manual_required` with `application_url` surfaced — never a
+  bypass. The same user cannot create two submitted applications for the same job
+  without an explicit warning and confirmation. Every application record is traceable
+  to exactly one user, one job, one source, and (if used) one resume version. A failed
+  submission is always recorded as `failed`, never silently reported as `submitted`. A
+  user can disable automated mode at any time, effective immediately for future
+  applications. An application can never be created or modified by anyone other than
+  its owner.
+- **Edge cases**: A network failure after submission but before a confirmed response is
+  recorded as ambiguous and requires a provider/state check (or user confirmation)
+  before any retry — never assumed successful or resent. A screening question with no
+  matching stored data always routes to `needs_review`/`manual_required`, never a
+  best-guess answer.
+- **Dependencies**: STORY-059, STORY-036, STORY-037, STORY-040, STORY-044, STORY-045,
+  STORY-046, STORY-017, STORY-034.
+- **Priority**: P3
+
+#### STORY-061 — Application Tracking & History
+- **User story**: As a job seeker, I want to see every application I've made through the
+  platform, with its current status, so I can track my job search in one place.
+- **Functional requirements**: A listing view of the user's own applications — job,
+  company, application date, mode, status, source, selected resume, failure/manual-
+  required state; basic filter/sort consistent with existing list-UI conventions
+  (STORY-031/032/033).
+- **Technical notes**: Reads the application record STORY-060 already creates; no new
+  write path, no new automation behavior — a read-only reporting layer, independently
+  deliverable and testable even before every STORY-060 mode is fully built out.
+- **Acceptance criteria**: A user sees only their own applications, correct status,
+  accurate provenance fields.
+- **Edge cases**: An application whose linked resume was later deleted still shows its
+  historical, point-in-time submission details.
+- **Dependencies**: STORY-060.
+- **Priority**: P3
+
 ## 4. Recommended Architecture Baseline
 
 - Frontend: Next.js + TypeScript
@@ -955,10 +1095,12 @@ the current group's Stories are complete and verified (per the Definition of Don
 20. **CI** — STORY-053, STORY-054
 21. **Authentication and personalization** — STORY-036, STORY-037, STORY-038,
     STORY-039, STORY-044
-22. **Resume-fit features** — STORY-040, STORY-041, STORY-042
-23. **Advanced deduplication and scaling** — STORY-026, STORY-024, STORY-050,
+22. **Resume management** — STORY-040, STORY-059
+23. **Resume-fit features** — STORY-041, STORY-042
+24. **Advanced deduplication and scaling** — STORY-026, STORY-024, STORY-050,
     STORY-051, STORY-052, STORY-055, STORY-056, STORY-058, STORY-048, STORY-049,
     STORY-020
+25. **Job application automation** — STORY-060, STORY-061
 
 ## 6. Definition of Done (per Story)
 
@@ -976,6 +1118,13 @@ A Story is complete only when **all** of the following are true:
    files changed, commands run, and results — not merely "code was generated."
 8. Any deviation from this Story's stated requirements is recorded as a Decision in
    `progress.md`, not silently implemented differently.
+9. For any Story involving automated submission to an external system (e.g.
+   STORY-060): source/provider authorization is verified before automated submission
+   is enabled, no CAPTCHA/access-control bypass mechanism exists, duplicate-submission
+   protection is implemented and tested, only truthful/user-approved data is ever
+   submitted, a tested manual-fallback path exists, every submission produces an audit
+   record, and privacy/security requirements (§1.2, §1.3, STORY-044) are verified — not
+   merely coded.
 
 A Story is **not** done if code exists but was not verified (tests not run, migration
 not applied, build not confirmed). Generated-but-unverified code must remain marked
