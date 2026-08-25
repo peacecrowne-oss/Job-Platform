@@ -6,6 +6,11 @@ plumbing: an engine, a session factory, a declarative base for Alembic
 against a healthy Postgres is normally guaranteed by Docker Compose
 healthchecks (STORY-005); the retry/backoff here covers the edge case of
 running the backend where that guarantee doesn't hold.
+
+check_database_connection(max_attempts=1) (STORY-052) reuses this exact
+function, unmodified, as the Postgres readiness check -- a single bounded
+attempt, no retry loop; retries remain this function's own default
+behavior for the startup use case, a separate concern.
 """
 
 import logging
@@ -38,7 +43,18 @@ _session_factory: sessionmaker | None = None
 def get_engine() -> Engine:
     global _engine
     if _engine is None:
-        _engine = create_engine(get_settings().database_url, pool_pre_ping=True)
+        # connect_args={"connect_timeout": ...} (STORY-052) only bounds
+        # establishing a *new* connection -- never query execution time on
+        # an already-pooled one -- so this is safe for normal traffic and
+        # also directly benefits it: previously unbounded, a genuinely
+        # unreachable Postgres could hang for an OS-default duration far
+        # longer than any caller (including the STORY-052 readiness check,
+        # which needs this to fail fast) would want to wait.
+        _engine = create_engine(
+            get_settings().database_url,
+            pool_pre_ping=True,
+            connect_args={"connect_timeout": int(get_settings().health_check_timeout_seconds)},
+        )
     return _engine
 
 

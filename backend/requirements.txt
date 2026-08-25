@@ -1,4 +1,10 @@
-fastapi==0.115.6
+# STORY-043: bumped from 0.115.6 -- pip-audit found 9 known vulnerabilities
+# (PYSEC-2026-161/248/249/1941/1942/2280/2281) in the starlette version
+# 0.115.6 pins in (<0.42.0). No version of starlette in that range is
+# patched; 0.135.0 is the minimum FastAPI version that drops the upper
+# bound entirely (starlette>=0.46.0, no cap), letting pip resolve the
+# latest starlette (1.6.0 at audit time), which fully resolves all 9.
+fastapi==0.135.0
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
 pydantic-settings==2.7.1

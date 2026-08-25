@@ -4,6 +4,11 @@ Without this, an unhandled exception falls through to Starlette's default
 plain-text 500 response instead of the JSON error envelope the rest of the
 API uses. HTTPException and request-validation errors are also normalized
 into the same envelope shape for consistency.
+
+`exc.headers` is forwarded onto the response (STORY-045) -- without this,
+an `HTTPException` raised with e.g. a `Retry-After` header (the rate
+limiter's own `429` responses) would silently lose it, since nothing
+previously copied HTTPException's headers onto the JSONResponse.
 """
 
 import logging
@@ -24,6 +29,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"message": exc.detail, "status_code": exc.status_code}},
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -31,7 +37,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
                 "error": {
                     "message": "Validation error",

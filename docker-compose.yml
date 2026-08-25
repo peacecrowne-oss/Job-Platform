@@ -37,12 +37,20 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
+      # STORY-052: points at /health/ready (dependency-aware), not the
+      # liveness-only /health -- container orchestration wants to know
+      # "can this serve real traffic," which is readiness's exact
+      # definition. Explicit try/except (not relying on an uncaught
+      # HTTPError's own exit-1 side effect, which /health's old
+      # unconditional-200 response never exercised) -- urlopen() raises
+      # HTTPError for the 503 a real dependency outage returns, verified
+      # live before relying on this.
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)",
+          "import urllib.request,sys\ntry:\n  sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready').status == 200 else 1)\nexcept Exception:\n  sys.exit(1)",
         ]
       interval: 5s
       timeout: 5s

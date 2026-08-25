@@ -3,3 +3,8 @@
 
 pytest==8.3.4
 httpx==0.28.1
+# Dependency vulnerability scanning (STORY-043). Run: pip-audit
+pip-audit==2.10.1
+# STORY-054: diagnostic coverage reporting only -- no --cov-fail-under gate,
+# since the Story's own literal AC doesn't specify a threshold.
+pytest-cov==6.0.0

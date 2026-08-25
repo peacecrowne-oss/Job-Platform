@@ -51,22 +51,51 @@ accepts the enum) with no `.value` conversion needed, unlike the
 string-valued filters above. Omitted -- the pre-STORY-032 default
 (relevance-if-query-present-else-newest) is unchanged. Not echoed back in
 the response, for the same minimal-change reasoning as the filters above.
+
+Input validation bounds (STORY-043): the 5 free-text filters
+(`seniority`/`company`/`location_*`) previously had no length or
+repeated-value-count bound, unlike `q`'s own `max_length=500` -- a real
+gap in "input validation at API boundaries." Each now uses
+`Annotated[str, StringConstraints(max_length=...)]` as its list's element
+type (per-item string length) plus `Query(max_length=...)` on the list
+itself (repeated-value count) -- verified empirically that these are two
+genuinely distinct FastAPI/Pydantic mechanisms, not redundant, before
+relying on both. Per-item lengths match the real `Job` column widths
+they're compared against (`String(100)` for `seniority`, `String(255)`
+for the other four) -- not arbitrary numbers. The repeated-value count
+cap (20) is a reasoned, flagged judgment call for free-text filters with
+no natural cardinality; `work_mode`/`employment_type` are capped at their
+own real enum cardinality (3 and 7) instead, since enum validation alone
+doesn't stop the same valid value being repeated an unbounded number of
+times.
+
+Per-IP rate limiting (STORY-045) via `app.rate_limit.rate_limit()` --
+fixed-window Redis counter, fails open on Redis unavailability (see
+`app/rate_limit.py`'s own docstring for the full reasoning). `GET
+/health` is deliberately never rate-limited (Docker's own healthcheck
+polls it continuously).
 """
 
 from __future__ import annotations
 
 import datetime
 import uuid
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models.job import EmploymentType, Job, WorkMode
+from app.rate_limit import rate_limit
 from app.search.service import SortMode, search_jobs
 
 router = APIRouter(tags=["search"])
+
+_Seniority = Annotated[str, StringConstraints(max_length=100)]
+_Company = Annotated[str, StringConstraints(max_length=255)]
+_LocationPart = Annotated[str, StringConstraints(max_length=255)]
 
 
 class JobSearchResult(BaseModel):
@@ -101,19 +130,29 @@ def _to_result(job: Job) -> JobSearchResult:
     return JobSearchResult.model_validate(job)
 
 
-@router.get("/jobs/search", response_model=JobSearchResponse)
+# A named, module-level instance (not inlined into the decorator) so tests
+# can target it directly via `app.dependency_overrides[search_rate_limit]`
+# -- the same established pattern this file already uses for `get_db`.
+search_rate_limit = rate_limit(scope="search")
+
+
+@router.get(
+    "/jobs/search",
+    response_model=JobSearchResponse,
+    dependencies=[Depends(search_rate_limit)],
+)
 def get_job_search(
     q: str | None = Query(default=None, max_length=500),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     sort: SortMode | None = Query(default=None),
-    work_mode: list[WorkMode] | None = Query(default=None),
-    employment_type: list[EmploymentType] | None = Query(default=None),
-    seniority: list[str] | None = Query(default=None),
-    company: list[str] | None = Query(default=None),
-    location_country: list[str] | None = Query(default=None),
-    location_region: list[str] | None = Query(default=None),
-    location_city: list[str] | None = Query(default=None),
+    work_mode: list[WorkMode] | None = Query(default=None, max_length=3),
+    employment_type: list[EmploymentType] | None = Query(default=None, max_length=7),
+    seniority: list[_Seniority] | None = Query(default=None, max_length=20),
+    company: list[_Company] | None = Query(default=None, max_length=20),
+    location_country: list[_LocationPart] | None = Query(default=None, max_length=20),
+    location_region: list[_LocationPart] | None = Query(default=None, max_length=20),
+    location_city: list[_LocationPart] | None = Query(default=None, max_length=20),
     session: Session = Depends(get_db),
 ) -> JobSearchResponse:
     # Over-fetch by one to answer has_next from this single query, instead

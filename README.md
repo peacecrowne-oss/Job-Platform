@@ -1,9 +1,11 @@
 # Job Opportunity Aggregation & Job-Seeking Platform
 
-> **Status: early repository scaffolding.** Repository structure, environment
-> configuration, documentation, a minimal backend API foundation (a health
-> check and a full-text job search endpoint), a minimal frontend foundation
-> (placeholder home page only), a full
+> **Status: early repository scaffolding, now with a working job search UI.**
+> Repository structure, environment
+> configuration, documentation, a backend API foundation (a health
+> check and a full-text/filtered/sorted/paginated job search endpoint), a
+> working frontend job search page (STORY-035 — search, filters, sorting,
+> pagination, all URL-state-backed), a full
 > local Docker Compose stack (backend, frontend, Postgres, Redis, all with
 > healthchecks), backend connection plumbing to Postgres/Redis, the Alembic
 > migration framework, the canonical `jobs`/`companies`/`sources`/
@@ -30,8 +32,31 @@
 > filters STORY-057 built indexes for — plus sorting by relevance, posting
 > date, or last-seen date (`sort=relevance|posting_date|last_seen`),
 > preserving keyword matching regardless of which sort is chosen, with an
-> explicit, documented `NULLS LAST` decision for undated postings) exist
-> so far. No
+> explicit, documented `NULLS LAST` decision for undated postings), plus
+> a real frontend job search page at `/` (STORY-035 — search box, 7
+> filter controls, a sort select, Previous/Next pagination, all reflected
+> in the URL for shareable/bookmarkable searches; CORS added to the
+> backend so the browser can reach it cross-origin), and a security
+> hardening pass (STORY-043 — input-validation length/count bounds on
+> every search filter matching the real schema they're compared against,
+> parameterized queries verified clean, a real `pip-audit` dependency
+> scan that found and fixed 9 known vulnerabilities via a FastAPI
+> upgrade, `npm audit` clean), and per-IP rate limiting (STORY-045 — a
+> Redis-backed fixed-window limiter on `GET /jobs/search`, `429` with a
+> real `Retry-After` hint once exceeded, fails open if Redis is
+> unavailable, `GET /health` deliberately exempt so Docker's own
+> healthcheck is never blocked), and liveness/readiness health checks
+> (STORY-052 — `GET /health/live` for "is the process alive," `GET
+> /health/ready` checking Postgres and Redis concurrently and returning
+> `503` if either is unreachable, each check wall-clock-bounded to
+> `health_check_timeout_seconds` end-to-end including DNS resolution
+> (not just the TCP-connect phase), Docker Compose's backend healthcheck
+> retargeted to `/health/ready`), and an automated testing strategy
+> (STORY-054 — pytest `integration`/`postgres`/`redis` markers, an
+> isolated `job_platform_test` database and Redis DB index for real
+> Postgres/Redis integration tests with safety guards against ever
+> targeting development data, and a first Playwright E2E test covering
+> the search flow against the real local stack) exist so far. No
 > connector-to-persistence orchestration or CI have been implemented yet —
 > nothing currently calls the upsert or the retry wrapper automatically
 > from a live source; the `jobs` table itself is empty again (validated
@@ -55,11 +80,13 @@ organized as numbered Stories (`STORY-NNN`). Implementation progress is tracked 
 ## Planned architecture
 
 This describes the target architecture per `requirement.md` §4. The Backend API and
-Frontend rows have minimal foundations only: the backend is app bootstrap,
-configuration, `/health`, error handling, and now a SQLAlchemy engine/session and
-a Redis client with verified real connectivity (no models, no auth, no product
-endpoints); the frontend is a single placeholder page (no search, job listings, or
-auth UI). Containerization is implemented end-to-end: individual `Dockerfile`s for
+Frontend rows now have real feature content: the backend is app bootstrap,
+configuration, `/health`, error handling, a SQLAlchemy engine/session and
+a Redis client with verified real connectivity, and a full-text/filtered/
+sorted/paginated job search endpoint (no auth, no other product endpoints
+yet); the frontend is a working job search page at `/` (STORY-035 — search,
+filters, sorting, pagination; no job listings/detail page, saved jobs, or
+auth UI yet). Containerization is implemented end-to-end: individual `Dockerfile`s for
 both services (STORY-004) plus a `docker-compose.yml` (STORY-005) orchestrating
 backend, frontend, Postgres, and Redis together with healthchecks — verified via a
 real `docker compose up`. Cache/task-broker row is "provisioned and reachable"
@@ -186,9 +213,10 @@ not yet implemented.
 
 ```
 frontend/               Next.js + TypeScript app
-frontend/app/           App Router: root layout + placeholder home page (STORY-013)
-frontend/lib/           Environment-driven config (API base URL)
-frontend/tests/         Frontend test suite (vitest; STORY-013 tests only so far)
+frontend/app/           App Router: root layout + job search page (STORY-013, STORY-035)
+frontend/components/    JobCard (STORY-035)
+frontend/lib/           Environment-driven config, search API client, URL-state helpers
+frontend/tests/         Frontend test suite (vitest + Testing Library; 56 tests)
 frontend/package.json   Pinned dependencies; package-lock.json for reproducible installs
 frontend/Dockerfile     Multi-stage build image (STORY-004)
 frontend/.dockerignore
@@ -273,11 +301,16 @@ pip install -r requirements-dev.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-This serves the current backend foundation, which only exposes `GET /health`. There
-is no database connection, authentication, or product API yet — those belong to
-later Stories.
+This serves the current backend, which exposes `GET /health`
+(liveness alias), `GET /health/live`, `GET /health/ready` (checks
+Postgres + Redis, `503` if either is unreachable), and
+`GET /jobs/search`. There is no authentication or other product API yet —
+those belong to later Stories. Note: `python -m uvicorn` run this way
+doesn't have `CORS_ALLOWED_ORIGIN` set unless you export it or use the
+Docker workflow below — the frontend's search requests will be blocked by
+the browser without it.
 
-Frontend (STORY-013 — foundation only; a single placeholder page, no product UI):
+Frontend (STORY-013 foundation + STORY-035 job search UI):
 
 ```bash
 cd frontend
@@ -285,8 +318,10 @@ npm ci
 npm run dev
 ```
 
-Serves the placeholder home page at `http://localhost:3000`, reading
-`NEXT_PUBLIC_API_BASE_URL` from the repository-root `.env` (copied above). If that
+Serves the job search page at `http://localhost:3000`, reading
+`NEXT_PUBLIC_API_BASE_URL` from the repository-root `.env` (copied above) — the
+backend must also be running and reachable, with CORS configured for this
+origin (see above). If that
 variable is missing or not a valid URL, `npm run dev` / `npm run build` fail with an
 explicit error rather than silently rendering a broken page — this is a deliberate
 requirement of STORY-013, not a bug.
@@ -541,9 +576,54 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-**Frontend foundation tests are implemented and runnable** (STORY-013 scope only —
-the environment-driven API base URL logic, including its "fails visibly when
-missing/invalid" behavior). They require no external infrastructure:
+Also covered: STORY-043's input-validation bounds (each free-text search
+filter at/over its real schema-derived length limit and its repeated-value
+count limit), a live SQL-injection-shaped-value regression across every
+text-accepting search param confirming the table stays intact, and that an
+unhandled exception never returns its message/stack trace to the client
+(only a fixed generic one, the real exception logged server-side only),
+plus rate limiting — the fixed-window counter's limit/reject/Retry-After
+behavior, independent keying per scope and per IP, a pluggable `key_func`,
+and failing open (never closed) on a Redis error, all against a mocked
+Redis client (STORY-045 — live-validated against real Redis and Docker's
+own healthcheck traffic pattern during implementation; see progress.md
+for the full validation record, including a real regression this Story's
+own implementation caused and fixed in the test suite itself).
+
+**Dependency vulnerability scanning** (STORY-043 — run manually today;
+CI wiring is STORY-053's own future scope, not built here):
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pip-audit -r requirements.txt
+
+cd ../frontend
+npm audit
+```
+
+Both are clean as of the last STORY-043 run (`pip-audit`: 0 known
+vulnerabilities, after upgrading `fastapi` 0.115.6 → 0.135.0 to resolve 9
+that were found in a transitive `starlette` dependency; `npm audit`: 0
+known vulnerabilities). See `progress.md` for the full finding and fix.
+
+**Frontend tests are implemented and runnable** — STORY-013's environment-driven
+API base URL logic (including its "fails visibly when missing/invalid" behavior),
+plus a full suite for STORY-035's job search page: the URL-state helpers
+(`lib/searchParams.ts`, pure functions, round-trip tested), the search API
+client (`lib/searchApi.ts` — query-parameter encoding including repeated
+values and special characters, non-2xx/network-failure handling, abort-signal
+passthrough, all against a mocked `fetch`), `JobCard` rendering (present vs.
+absent optional fields, safe vs. unsafe link schemes), and the page itself
+(initial render, default/keyword/Enter-key/clear search, every filter
+control individually and combined, sort selection, Previous/Next with
+offset reset on every other change, loading/both empty-state variants/
+error/retry, missing-optional-field rendering, external-link safety,
+URL-state initialization from a pre-set URL, and basic keyboard/tab-order
+interaction) — via Vitest + `@testing-library/react` + `@testing-library/user-event`
+against a `jsdom` environment, mocking `next/navigation` and the search API
+module rather than touching a live backend. They require no external
+infrastructure:
 
 ```bash
 cd frontend
@@ -551,12 +631,74 @@ npm ci
 npm test
 ```
 
-A full backend/frontend testing strategy — integration tests against an isolated
-test database, broader frontend unit/component coverage, and Playwright end-to-end
-coverage — is **not yet implemented**; that is tracked separately as STORY-054.
+**Automated testing strategy is implemented** (STORY-054): pytest markers
+(`integration`, `postgres`, `redis`, registered in `backend/pytest.ini`)
+split the backend suite into a fast, dependency-free subset and a
+Postgres/Redis-backed integration subset, plus a first Playwright E2E test
+for the search flow (job detail/auth E2E is deferred until STORY-034/036
+are built — the AC's own "once built" qualifier).
 
-Connectors will be tested against recorded/mocked responses only; CI will never make
-live calls to external job sources.
+```bash
+# Backend -- fast/local (no Docker required)
+cd backend && pytest -m "not integration"
+
+# Backend -- integration (requires Docker Compose's postgres/redis running;
+# run from inside the network, e.g. `docker compose exec backend ...`, or
+# via a throwaway container attached to the compose network, since
+# Postgres/Redis aren't published to the host)
+pytest -m integration
+
+# Backend -- full suite
+pytest
+
+# Frontend
+cd frontend && npm test          # unit/component
+npm run build                     # production build + real TS type-check
+
+# Whole repo, fast checks only (backend fast + frontend unit + frontend build)
+scripts/run-tests.sh              # requires the backend venv already activated
+```
+
+**Isolated test database**: integration tests run against `job_platform_test`
+(new `TEST_DATABASE_URL` setting, defaulting to the same Postgres container/
+credentials, a different database name), created and migrated to head
+automatically by a session-scoped fixture (`backend/tests/conftest.py`),
+never the real `job_platform` database — a safety guard refuses to run if the
+test URL isn't clearly distinct. Each test runs inside its own transaction,
+rolled back afterward, so nothing persists and tests never see each other's
+rows.
+
+**Isolated Redis**: integration tests use Redis DB index `1` (new
+`TEST_REDIS_URL` setting) — never DB `0` (development/rate-limiting). Cleanup
+deletes only the specific keys a test created, never `FLUSHDB`/`FLUSHALL`.
+
+**E2E (Playwright)**: runs against the real local Docker Compose stack, not a
+Playwright-managed server:
+
+```bash
+docker compose up -d
+python backend/scripts/seed_e2e_fixtures.py     # seeds 25 deterministic
+                                                  # fixture jobs, source="e2e_fixture"
+cd frontend && npm run e2e
+python ../backend/scripts/seed_e2e_fixtures.py --cleanup   # removes only
+                                                              # source="e2e_fixture" rows
+```
+
+Real, live-validated numbers (see `progress.md` for the full record): backend
+421/421 passing (413 pre-existing + 8 new integration tests), frontend 56/56
+plus 1 passing E2E test, `pytest -m "not integration"` confirmed to need no
+Docker at all, a deliberately-introduced failing test confirmed `pytest`
+returns a real non-zero exit code, and the real `job_platform`
+database/Redis DB 0 confirmed untouched (row/key counts checked before and
+after) by every integration/E2E run including their own cleanup steps.
+
+**CI-ready, not CI itself**: `.github/workflows/` remains untouched — the
+commands above are what STORY-053 (not yet implemented) will invoke; no
+coverage percentage gate is enforced (`pytest-cov` is wired in
+diagnostically only, since STORY-054's own literal AC specifies none).
+
+Connectors are tested against recorded/mocked responses only; nothing here
+makes a live call to an external job source.
 
 ## Connector principles
 

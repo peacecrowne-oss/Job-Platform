@@ -133,8 +133,8 @@ STORY-007/STORY-008 circular dependency found on 2026-08-18 was fixed
 with explicit human approval on 2026-08-19 (see Decisions). This
 repository was also initialized as a Git repo and pushed to
 `https://github.com/peacecrowne-oss/Job-Platform.git` on 2026-08-20 (see
-Decisions). Equal-weight completion across all 58 Stories: **51.7%**
-(3000 ÷ 5800).
+Decisions). Equal-weight completion across all 58 Stories: **56.9%**
+(3300 ÷ 5800).
 
 ## Audit — 2026-08-18
 
@@ -2280,8 +2280,9 @@ None in progress. STORY-001, STORY-002, STORY-003, STORY-004, STORY-005,
 STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
 STORY-019, STORY-020, STORY-022, STORY-025, STORY-027, STORY-029,
-STORY-030, STORY-031, STORY-032, STORY-033, STORY-046, and STORY-057 are
-complete — **30 Stories, all at 100%**; no Story is currently in flight.
+STORY-030, STORY-031, STORY-032, STORY-033, STORY-035, STORY-043,
+STORY-045, STORY-046, STORY-052, STORY-054, and STORY-057 are complete —
+**35 Stories, all at 100%**; no Story is currently in flight.
 
 ## Prioritized Backlog
 
@@ -2318,7 +2319,7 @@ Per `requirement.md` §5 (Implementation Sequence for Claude), in order:
     Decision below), STORY-035
 18. Job detail UI — STORY-034, STORY-047
 19. Security hardening — STORY-043, STORY-045, STORY-046
-20. CI — STORY-053, STORY-054
+20. CI — STORY-053, STORY-054 ✅ (complete)
 21. Authentication and personalization — STORY-036, STORY-037, STORY-038, STORY-039,
     STORY-044
 22. Resume-fit features — STORY-040, STORY-041, STORY-042
@@ -3151,33 +3152,441 @@ TypeScript") and it passed with 0 errors on every build run above.
   `README.md`, `progress.md`. Test suite: 364/364 passing (340
   pre-existing + 24 new). No changes to `Job`/any model, no Alembic
   migration, no new index.
+- **STORY-035 — Job Search UI** — **complete, 100%**, `app/page.tsx`
+  (`/`) replaced STORY-013's own explicitly-temporary placeholder with a
+  full search page — search box, 7 filter controls (checkbox groups for
+  `work_mode`/`employment_type` sourced from the real backend enums,
+  single-value text inputs for `seniority`/`company`/`location_*`, a
+  flagged, explicit limitation since the backend's repeatable free-text
+  filters only support one value each in this initial UI), a `sort`
+  select (`relevance`/`posting_date`/`last_seen`, plus an implicit
+  default option), Previous/Next pagination driven by the real
+  `has_next`/`has_previous` (never a fabricated "Page X of Y" — no total
+  count exists), and full URL state via `useSearchParams`/`router.push`
+  (STORY-035's own technical note, not optional) — every search/filter/
+  sort/page action is bookmarkable/shareable/refresh-persistent. **Real,
+  necessary backend change, flagged and approved as part of the plan**:
+  added `CORSMiddleware` (`backend/app/main.py`) scoped to exactly one
+  configured origin (`cors_allowed_origin`, new `Settings` field,
+  `CORS_ALLOWED_ORIGIN` in `.env.example`) and `GET` only — without it,
+  the browser blocks every client-side fetch from the frontend's origin
+  to the backend's, regardless of frontend correctness; verified live
+  (present for the configured origin, absent for an arbitrary one) and
+  via 2 new backend tests. Architecture: client-side fetching chosen over
+  server-side (a Server Component fetching from inside the frontend
+  container would need a new, currently-undefined internal Docker URL
+  — a bigger change than the CORS addition). **Real, honest technical
+  finding recorded during implementation**: Vitest's default `forks` pool
+  hangs indefinitely on this Windows environment (a worker-timeout error,
+  zero tests run) — `pool: "threads"` in `vitest.config.ts` fixed it;
+  and `@/*` path aliases (already used by Next.js's own bundler) aren't
+  read from `tsconfig.json` by Vitest/Vite automatically, needing an
+  explicit `resolve.alias` entry. New devDependencies (flagged as
+  necessary, not a production UI framework): `@testing-library/react`
+  16.3.2 (explicitly supports React 19, verified via its own
+  `peerDependencies` before relying on it), `@testing-library/user-event`,
+  `jsdom` — `vitest.config.ts`'s `environment` switched from STORY-013's
+  `"node"` to `"jsdom"`. Job cards display only fields the real API
+  response actually returns (no compensation/description/excerpt — not
+  in the schema); absent optional fields are omitted, never a
+  placeholder. External `source_url`/`application_url` links use
+  `rel="noopener noreferrer"` plus an `isSafeHttpUrl()` scheme guard
+  (defense-in-depth against a hypothetical non-http(s) value). No
+  internal job-detail route added — STORY-034 explicitly not implemented
+  inside this Story. Accessibility/responsive **baseline** included
+  (real `<label>`/`<fieldset>`/`<legend>` associations, semantic
+  controls only, focus never suppressed, `aria-live="polite"` on the
+  results region, mobile-first CSS with a `768px` breakpoint) —
+  **STORY-048/049 not marked complete**, no automated axe checks or
+  cross-breakpoint AC verification performed. Plain CSS
+  (`app/globals.css`) — zero new production/styling dependencies.
+  **Validated against a real, running Docker Compose stack** with 25
+  deterministic demo job rows (never live Greenhouse/Ashby calls, never
+  committed) — default search, keyword search, each filter, sort, and
+  pagination all verified via direct backend `curl` against the exact
+  query shapes the UI sends, confirming `has_next`/`has_previous`/
+  filter-narrowing/sort-ordering all correct against real data; demo
+  rows deleted afterward (`jobs` table confirmed empty again). **No
+  browser-automation/screenshot tool is available in this session**
+  (checked, same limitation as the earlier read-only UI-inspection
+  turn) — visual verification instead relied on the frontend test suite
+  (56 tests, real React component behavior against mocked/real data
+  shapes), the initial server-delivered HTML shell loading without a
+  Next.js error overlay, and direct backend verification; the Docker
+  stack was left running (per the standing preference recorded this
+  session) so the UI can be checked directly at `http://localhost:3000`.
+  Files created: `frontend/lib/searchApi.ts`, `frontend/lib/searchParams.ts`,
+  `frontend/components/JobCard.tsx`, `frontend/app/globals.css`,
+  `frontend/vitest.setup.ts`, `frontend/tests/searchApi.test.ts`,
+  `frontend/tests/searchParams.test.ts`, `frontend/tests/JobCard.test.tsx`,
+  `frontend/tests/page.test.tsx`. Files modified: `frontend/app/page.tsx`
+  (full rewrite), `frontend/app/layout.tsx` (+globals.css import),
+  `frontend/package.json`/`package-lock.json` (+3 devDependencies),
+  `frontend/vitest.config.ts` (jsdom, threads pool, path alias, setup
+  file), `backend/app/config.py` (+`cors_allowed_origin`),
+  `backend/app/main.py` (+`CORSMiddleware`), `backend/tests/test_app.py`
+  (+2 CORS tests), `.env.example` (+`CORS_ALLOWED_ORIGIN`), `README.md`,
+  `progress.md`. Test suites: backend 366/366 passing (364 pre-existing +
+  2 new); frontend 56/56 passing (4 pre-existing + 52 new — the very
+  first component-level frontend tests in this repository). No changes
+  to `Job`/any model, no Alembic migration.
+- **STORY-043 — Security Hardening (General)** — **complete, 100%**,
+  scoped to exactly the 5 functional requirements `requirement.md`'s own
+  literal text names — not the broader generic security checklist a
+  prompt template suggested (headers, CORS, TrustedHost, request-size
+  limits, Docker hardening) — since none of those appear in STORY-043's
+  own text; explicitly flagged and left out, not silently built or
+  silently skipped. **Real gap found and fixed**: `GET /jobs/search`'s 5
+  free-text filters (`seniority`/`company`/`location_*`) had no length or
+  repeated-value-count bound, unlike `q`'s existing `max_length=500` — a
+  literal instance of "input validation at API boundaries." Fixed via
+  `Annotated[str, StringConstraints(max_length=...)]` as each list
+  param's element type (per-item length, verified empirically to be a
+  distinct mechanism from `Query(max_length=...)`'s own list-length
+  effect on `list[str]` params, confirmed live before relying on both)
+  plus `Query(max_length=...)` for repeated-value count. Per-item bounds
+  match the real `Job` column widths each filter is compared against
+  (100 for `seniority`, 255 for the other four) — not arbitrary numbers;
+  repeated-value caps are 20 for the free-text filters (a flagged
+  judgment call) and 3/7 for `work_mode`/`employment_type` (their own
+  real enum cardinality — enum validation alone doesn't stop the same
+  valid value being repeated unboundedly). Parameterized queries:
+  verified clean via a repo-wide grep (zero raw SQL interpolation
+  anywhere) plus a live SQL-injection-shaped-value regression against
+  real Postgres across all 6 text-accepting params (`q` and the 5
+  filters) — every one returned `200`/zero matches, table confirmed
+  intact afterward. CSRF protection / secure cookie flags: **verified
+  genuinely N/A, not built speculatively** — grepped both backend and
+  frontend source for `set_cookie`/`Set-Cookie`/`document.cookie`, zero
+  matches anywhere; no cookie-based auth flow exists yet (STORY-036
+  unbuilt), so there is nothing to protect — documented in `main.py` for
+  STORY-036 to find, consistent with this project's "no premature
+  abstraction" discipline applied throughout every prior Story, rather
+  than building untestable CSRF/cookie-flag scaffolding now.
+  **Dependency vulnerability scanning — a real, material finding,
+  stopped on and resolved with explicit approval, not silently
+  patched**: installed `pip-audit==2.10.1` (new devDependency) and ran it
+  for real against the pinned `requirements.txt` — found **9 known
+  vulnerabilities** in `starlette` 0.41.3 (transitive via `fastapi`), all
+  requiring `starlette>=0.47.2` to fix, while `fastapi==0.115.6` capped
+  starlette at `<0.42.0` — no small patch existed. Verified via direct
+  PyPI metadata queries (not guessed) that `fastapi>=0.135.0` is the
+  minimum version dropping that upper bound entirely; stopped
+  implementation and asked the human, who requested the best
+  recommendation. Upgraded to `fastapi==0.135.0` (the minimal version
+  that fully resolves the issue, deliberately not the latest 0.141.1 —
+  smallest change that satisfies the actual requirement, matching this
+  project's consistent discipline) — resolved to `starlette==1.6.0`.
+  Re-ran `pip-audit`: **0 known vulnerabilities**. Full backend suite
+  re-run immediately after the upgrade: 366/366 still passing, zero
+  regressions from the ~20-minor-version framework jump. One incidental,
+  zero-risk cleanup made as part of this same change (not separately
+  approved, since it directly follows from the approved dependency bump
+  and doesn't expand scope): `app/errors.py`'s
+  `HTTP_422_UNPROCESSABLE_ENTITY` (deprecated by the new starlette,
+  identical numeric value) renamed to `HTTP_422_UNPROCESSABLE_CONTENT`.
+  One additional deprecation warning (`httpx` vs. `starlette.testclient`,
+  suggesting `httpx2`) deliberately left as-is — a devDependency-only,
+  non-blocking, out-of-scope concern, not chased down. `npm audit`
+  (frontend): 0 vulnerabilities, confirmed fresh. **CI wiring
+  deliberately not built** — `.github/workflows/` remains untouched
+  (still only its `.gitkeep` placeholder); the literal AC's own
+  "(STORY-053)" citation attributes CI wiring to that separate,
+  not-yet-built Story, and STORY-053's own literal Dependencies
+  (`STORY-001, STORY-054`) don't list STORY-043 either — the two Stories
+  are formally independent. STORY-043 is marked complete on the reading
+  that the AC's own parenthetical acknowledges CI wiring as STORY-053's
+  deliverable; the scanning capability and a real, current, clean result
+  are what STORY-043 itself delivers. Error disclosure, debug mode,
+  Docker runtime user, CORS: all re-verified already correct from prior
+  Stories (STORY-012/STORY-035/STORY-004), not rebuilt. Files created:
+  none. Files modified: `backend/app/api/search.py` (input-validation
+  bounds), `backend/app/errors.py` (deprecated-constant rename),
+  `backend/requirements.txt` (`fastapi` 0.115.6 → 0.135.0, documented
+  inline), `backend/requirements-dev.txt` (+`pip-audit`),
+  `backend/tests/test_search_api.py` (+20 tests), `backend/tests/test_errors.py`
+  (+1 test), `README.md`, `progress.md`. Test suite: 390/390 passing (366
+  pre-existing + 24 new). No changes to `Job`/any model, no Alembic
+  migration, no new backend endpoint.
+- **STORY-045 — Rate Limiting** — **complete, 100%**, scoped to what
+  actually exists in this codebase today, same discipline as STORY-043's
+  own finding: "per-account," "authenticated endpoints," "auth endpoints
+  (STORY-036)," and "any externally-triggered ingestion endpoints" are
+  all currently structurally N/A — confirmed via a direct grep of every
+  route in `app/api/*.py`, exactly two exist (`GET /health`,
+  `GET /jobs/search`), neither behind auth, no accounts/sessions anywhere.
+  What was built: a real, generically-reusable Redis-backed fixed-window
+  rate limiter (`app/rate_limit.py`, new module) — chosen over a token
+  bucket, both explicitly permitted by the Story's own "counters/token
+  buckets" technical note; a fixed window keyed by
+  `ratelimit:{scope}:{client_ip}:{window_start}` lets `INCR`+`EXPIRE` run
+  as one atomic `MULTI`/`EXEC` transaction with no race, since every
+  window gets a fresh key automatically. **Fails open, not closed, on any
+  Redis failure** — directly required by `app/redis_client.py`'s own
+  pre-existing STORY-008 precedent ("Redis unavailability must degrade
+  gracefully rather than hard-fail unrelated requests"), not a new
+  policy invented here. Applied to `GET /jobs/search` via
+  `dependencies=[Depends(search_rate_limit)]` (default 60 requests/60s
+  per IP, configurable via new `rate_limit_requests`/
+  `rate_limit_window_seconds` settings). **`GET /health` deliberately,
+  explicitly exempted** — Docker's own healthcheck polls it every 5
+  seconds continuously for the container's entire lifetime
+  (`docker-compose.yml`); a blanket limit would make the backend
+  container report itself unhealthy from its own infrastructure's normal
+  operation — the same principle the Story's own edge case names for
+  ingestion workers, applied here by direct, flagged analogy. **Real gap
+  found and fixed** to actually satisfy the literal AC ("a `429` with a
+  retry-after hint"): `app/errors.py`'s existing `HTTPException` handler
+  was silently dropping `exc.headers` entirely — meaning a `Retry-After`
+  header would never have reached the client even with a perfectly
+  correct limiter. Fixed by forwarding `headers=exc.headers` onto the
+  `JSONResponse`. `key_func` is pluggable (defaults to
+  `request.client.host`, correct for this project's current no-reverse-
+  proxy topology) specifically so STORY-036 can later attach a stricter,
+  account-aware configuration to its own login endpoint using this same
+  mechanism, not a separate unused stub. **A real regression discovered
+  and fixed during validation**: applying the limiter to `/jobs/search`
+  made every pre-existing test hitting that route (in
+  `test_search_api.py` and `test_errors.py`) attempt a real, failing
+  connection to the Docker-only `redis` hostname outside Docker — each
+  taking ~2.3s to time out, inflating the full suite from ~3s to ~137s
+  (confirmed reproducible on a second run, not a one-off). Fixed by
+  exposing a named, importable `search_rate_limit` dependency instance in
+  `app/api/search.py` (rather than an inline closure) and overriding it
+  to a no-op by default in both test files' `setup_module`/
+  `teardown_module`, matching the exact established pattern already used
+  for `get_db` in the same files — the 3 tests that specifically exercise
+  rate-limiting restore the real dependency with a mocked Redis client
+  for their own duration only. Suite back to ~3-6s after the fix.
+  **Live-validated against real Redis** (Docker Compose): a temporary
+  container with `RATE_LIMIT_REQUESTS=3`/`RATE_LIMIT_WINDOW_SECONDS=5`
+  confirmed real `429`s with a correct `Retry-After` value (down to `1`
+  second observed) once the limit was exceeded via genuinely-parallel
+  requests (an earlier sequential test attempt was itself confounded by
+  window-boundary crossings caused by the diagnostic loop's own overhead
+  — documented, not glossed over, and re-run correctly), a real Redis key
+  (`ratelimit:search:<ip>:<window_start>`) with the expected `TTL`, the
+  limit resetting correctly after the window passed, and `/health`
+  confirmed still returning `200` on every request even while
+  `/jobs/search` was actively rejecting on the same container. Temporary
+  container removed, real backend restarted with the normal configured
+  limits afterward. Files created: `backend/app/rate_limit.py`,
+  `backend/tests/test_rate_limit.py` (9 tests). Files modified:
+  `backend/app/config.py` (+2 settings), `backend/app/errors.py`
+  (header forwarding), `backend/app/api/search.py` (+dependency,
+  named instance), `backend/tests/test_app.py` (+1 test),
+  `backend/tests/test_search_api.py` (+3 tests, default override added),
+  `backend/tests/test_errors.py` (default override added),
+  `.env.example` (+2 vars), `README.md`, `progress.md`. Test suite:
+  403/403 passing (390 pre-existing + 13 new). No changes to `Job`/any
+  model, no Alembic migration, no new backend endpoint, no new
+  dependency.
+- **STORY-052 — Health Checks** — **complete, 100%**. `GET /health`
+  (STORY-012) kept permanently unchanged as a liveness-only alias — its
+  own original docstring already said readiness "belongs to STORY-052,"
+  so converting it now would have been a silent breaking change for any
+  existing caller expecting an unconditional `200`. Added `GET
+  /health/live` (identical check, same function via stacked
+  `@router.get("/health")` + `@router.get("/health/live")` decorators)
+  and `GET /health/ready` (new — checks Postgres and Redis, both named
+  explicitly in the Story's literal text), reusing
+  `check_database_connection(max_attempts=1)` and
+  `check_redis_connection()` unmodified. Both checks run concurrently via
+  a 2-worker `ThreadPoolExecutor` (worst case `max(pg, redis)`, not their
+  sum). Neither new route carries STORY-045's `rate_limit()` dependency —
+  same exemption reasoning as `/health` (Docker's own healthcheck polls
+  continuously; a self-inflicted `429` would be absurd). New
+  `health_check_timeout_seconds` setting (2.0s default) wired into both
+  the SQLAlchemy engine (`connect_args={"connect_timeout": ...}`) and the
+  Redis client (`socket_connect_timeout`/`socket_timeout`) — as a
+  side-effect this also hardens STORY-045's fail-open rate-limiter path
+  under genuine network-level Redis unreachability, previously only
+  exercised against an immediately-raised mocked `RedisError`.
+  **Real gap found live, not assumed, and fixed**: a live Docker test
+  (`docker compose stop postgres`, then a real request to `/health/ready`)
+  measured **4.098s**, not the ~2s the timeout settings above implied —
+  uncomfortably close to Docker's own `timeout: 5s` per-check budget.
+  Root-caused via `docker compose exec backend python -c "..."` running
+  raw `psycopg2.connect()` against the stopped service from *inside* the
+  real container (an initial test from the host was recognized as the
+  wrong scenario and discarded): Docker's embedded DNS takes ~3.1s to
+  fail resolving a *stopped* service's hostname, a phase `connect_timeout`
+  never bounds (it only covers the TCP handshake after a hostname has
+  already resolved). Fixed by wrapping each check's
+  `future.result(timeout=health_check_timeout_seconds)`, catching
+  `concurrent.futures.TimeoutError` as `"unreachable"` too — an explicit
+  wall-clock bound covering every failure phase (DNS, TCP connect, auth,
+  query) regardless of which layer is actually slow. The executor is
+  shut down with `wait=False` afterward, since a timed-out check's thread
+  can't be force-killed (Python can't interrupt a blocking syscall) — it's
+  abandoned to finish and be garbage-collected rather than blocking the
+  response. **Re-validated live after the fix**: `/health/ready` with
+  Postgres stopped now returns `503` in **2.010s** (matches the configured
+  2.0s timeout); with Redis stopped instead, **2.013s**, correct body
+  (`{"status":"not_ready","checks":{"postgres":"ok","redis":"unreachable"}}`).
+  Both dependencies restarted and `/health/ready` confirmed back to `200`
+  each time. **Debounce/threshold edge case verified live, not assumed**:
+  a ~12s Postgres outage (2 failed healthcheck cycles at Docker's existing
+  `interval: 5s`) never flipped the backend container to `unhealthy` in
+  `docker compose ps`, confirming Docker Compose's own pre-existing
+  `retries: 5` (unchanged since STORY-005) provides the debounce the
+  Story's edge case calls for — deliberately not solved with new
+  in-process state; readiness stays a simple, stateless, point-in-time
+  check. `docker-compose.yml`'s backend healthcheck retargeted from
+  `/health` to `/health/ready`, with an explicit `try/except
+  Exception: sys.exit(1)` replacing the old command's reliance on
+  `urlopen()`'s `HTTPError`-on-non-2xx as an accidental (never actually
+  exercised, since `/health` always returned unconditional `200` before
+  this Story) exit-1 side effect — verified live against a real `503`
+  before relying on it. Files created: none. Files modified:
+  `backend/app/api/health.py` (new `get_liveness`/`get_readiness`),
+  `backend/app/config.py` (+`health_check_timeout_seconds`),
+  `backend/app/db.py` (+`connect_args`), `backend/app/redis_client.py`
+  (+socket timeouts), `docker-compose.yml` (backend healthcheck
+  retargeted), `backend/tests/test_health.py` (+9 tests),
+  `backend/tests/test_app.py` (+1 test), `README.md`, `progress.md`.
+  Test suite: 413/413 passing (403 pre-existing + 10 new). Live Docker
+  validation: Postgres-outage, Redis-outage, both-recovered, and
+  brief-outage/debounce scenarios all confirmed against the real stack.
+  Credential/secret scan (`grep -in "changeme\|password"`) run across all
+  files touched by this Story — only pre-existing, expected matches
+  (the long-standing local-dev `changeme` default in `config.py`, a
+  deliberately-fake `password=hunter2` in a test asserting exception text
+  is never leaked, and `docker-compose.yml`'s `${POSTGRES_PASSWORD}` env
+  reference) — no new secret introduced. No changes to `Job`/any model,
+  no Alembic migration, no new dependency.
+- **STORY-054 — Automated Testing Strategy** — **complete, 100%**. Literal
+  scope resolution: the FR lists E2E coverage for "search, job detail,
+  auth," but the AC's own qualifier — "once built" — limits this to
+  currently-built core flows; STORY-034 (Job Detail) and STORY-036 (Auth)
+  don't exist yet, so only a search E2E test was written, not fabricated
+  against nonexistent UI. **Real gap found and closed**: direct inspection
+  confirmed every one of the 413 pre-existing backend tests was fully
+  offline/mocked — `test_dedup.py`/`test_search_service.py` themselves
+  documented that their real-Postgres behavior was only ever validated
+  *manually* during original implementation, never committed as
+  repeatable pytest; `test_redis.py`/`test_alembic.py` were the same. This
+  Story adds the missing layer: `backend/tests/conftest.py` (new) provides
+  an isolated-Postgres `db_session` fixture (a new `job_platform_test`
+  database — new `test_database_url` setting, same container/credentials,
+  different name — created and migrated to head via the real `alembic`
+  CLI as a subprocess with `DATABASE_URL` overridden, since `alembic/
+  env.py` unconditionally re-reads `Settings.database_url` itself, making
+  in-process `command.upgrade()` with a Config override unreliable — a
+  necessary implementation detail discovered during Phase 2, not part of
+  the originally-presented plan text, but a same-outcome, safer swap, not
+  a scope change) and an isolated-Redis `redis_test_client` fixture (DB
+  index `1` — new `test_redis_url` setting — never DB `0`). **Safety
+  guard** (explicitly required by the approved plan): both fixtures assert
+  the test URL is neither identical to nor missing the expected
+  distinguishing marker from the real development URL before doing
+  anything, refusing to run otherwise — verified live: the real
+  `job_platform` database and Redis DB `0` were checked (row/key counts)
+  before and after every integration/E2E run in this Story and confirmed
+  untouched every time. Redis cleanup deletes only explicitly-tracked
+  keys, never `FLUSHDB`/`FLUSHALL`. Three new pytest markers
+  (`integration`, `postgres`, `redis`, registered in `pytest.ini`) split
+  the suite; `pytest -m "not integration"` verified live to need no Docker
+  at all (all 8 new tests cleanly `pytest.skip()`, not fail, when
+  Postgres/Redis are unreachable). New integration tests:
+  `test_migrations_integration.py` (2 tests — `alembic upgrade head`
+  actually executed against a real database, confirming the expected
+  tables and the `jobs_search_vector_english()` function exist, not just
+  that the migration files parse), `test_search_service_integration.py`
+  (4 tests — full-text search via the real GIN index, faceted filtering,
+  `NULLS LAST` sort ordering, and gap/duplicate-free pagination, all
+  against real Postgres, closing the exact gap `test_search_service.py`'s
+  own comments flagged), `test_redis_integration.py` (2 tests — a real
+  429-then-`Retry-After`-then-reset cycle against real Redis, closing the
+  exact gap STORY-045's own progress.md entry flagged as manual-only).
+  **E2E**: `@playwright/test` (new devDependency, Chromium only — the
+  smallest setup satisfying the Story's own literal "Playwright" FR),
+  `frontend/playwright.config.ts`, `frontend/tests-e2e/search.spec.ts` —
+  one test covering open → see seeded jobs → paginate (25 fixture jobs,
+  20/page) → keyword search narrows to one → apply a consistent filter →
+  change sort → verify (not follow, to stay on the local stack) a safe
+  source link's exact `href`, run against the real local Docker Compose
+  stack per the approved plan's own instruction, not a Playwright-managed
+  server. **Real flake found and fixed during live validation**: the
+  filter-checkbox step initially used Playwright's `.check()`, which
+  failed with "Clicking the checkbox did not change its state" — the
+  final DOM snapshot actually showed `[checked]`, proving this was a
+  transient render-cycle race (the checkbox is React-controlled, driven by
+  `router.push`'s URL-state update, not an application bug) rather than a
+  real failure; fixed by switching to `.click()` + a separately-polling
+  `toBeChecked()` assertion, the correct Playwright pattern for a
+  controlled component, verified to pass reliably afterward.
+  `backend/scripts/seed_e2e_fixtures.py` (new) seeds/cleans up 25
+  deterministic fixture jobs tagged `source="e2e_fixture"` — a value no
+  real connector produces — directly in the real dev database (E2E
+  deliberately exercises the real stack, not the isolated pytest test
+  DB); cleanup deletes only `WHERE source = 'e2e_fixture'`, verified live
+  to remove exactly the seeded rows and leave the real table at 0 rows
+  again. `scripts/run-tests.sh` (new, repo root) runs the fast/local path
+  (backend `-m "not integration"`, frontend unit tests, frontend build)
+  for STORY-053 to invoke later — assumes an already-activated backend
+  venv, matching this repo's existing documented convention, not a new
+  environment-setup responsibility. `pytest-cov` added
+  (`requirements-dev.txt`) as diagnostic-only coverage reporting (94%
+  measured on the fast suite) — no `--cov-fail-under` gate, since
+  STORY-054's own literal AC specifies no threshold. **CI boundary
+  respected**: `.github/workflows/` untouched — this Story delivers
+  commands STORY-053 will consume, not CI itself; STORY-053 is not marked
+  complete. **Intentional-failure proof**: a scratch failing test was
+  added, confirmed `pytest` exits `1` (not swallowed), then removed.
+  Files created: `backend/tests/conftest.py`,
+  `backend/tests/test_migrations_integration.py`,
+  `backend/tests/test_search_service_integration.py`,
+  `backend/tests/test_redis_integration.py`,
+  `backend/scripts/seed_e2e_fixtures.py`, `frontend/playwright.config.ts`,
+  `frontend/tests-e2e/search.spec.ts`, `scripts/run-tests.sh`. Files
+  modified: `backend/app/config.py` (+2 settings), `backend/pytest.ini`
+  (+3 markers), `backend/requirements-dev.txt` (+`pytest-cov`),
+  `frontend/package.json` (+`@playwright/test`, +`e2e` script),
+  `frontend/vitest.config.ts` (+`exclude` for `tests-e2e/`), `README.md`,
+  `progress.md`. Test suite: backend 421/421 passing (413 pre-existing + 8
+  new, live-verified against the real Docker stack via a throwaway
+  container on the compose network, since Postgres/Redis aren't published
+  to the host); frontend 56/56 unit/component passing + 1/1 E2E passing.
+  No changes to `Job`/any model, no Alembic migration, no new application
+  feature.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/022/025/027/029/030/031/032/033/046/057
-are done — **30 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/022/025/027/029/030/031/032/033/035/043/045/046/052/054/057
+are done — **35 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
-- **STORY-035 — Job Search UI** — Dependencies are `STORY-013 ✅,
-  STORY-030 ✅, STORY-031 ✅, STORY-032 ✅, STORY-033 ✅` (confirmed by
-  direct re-read of `requirement.md`) — **all five now met. STORY-035 is
-  fully Ready** — the last unmet dependency (STORY-032) was cleared this
-  run.
+- **STORY-053 — CI/CD Pipeline**: depends on STORY-001 ✅, STORY-054 ✅ —
+  both dependencies now cleared. **STORY-053 is now Ready** (not
+  implemented; this Story deliberately did not touch `.github/workflows`,
+  only provided the deterministic commands STORY-053 can invoke).
+- **STORY-048 — Accessibility**: depends on STORY-013 ✅, STORY-035 ✅,
+  STORY-034 — still Blocked on STORY-034 (Job Detail Page), not yet built.
+  A baseline (real labels, semantic controls, `aria-live`, visible focus)
+  was already included in STORY-035's own UI, but STORY-048 itself —
+  automated axe checks, full WCAG 2.1 AA verification — is not built or
+  claimed complete.
 - **STORY-058 — Caching Strategy** (P2) remains Ready (STORY-008 ✅,
-  STORY-030 ✅) — unaffected directly by STORY-032.
+  STORY-030 ✅) — unaffected directly by STORY-054.
 - **STORY-039 — Saved Searches** depends on STORY-036, STORY-031 ✅ — not
-  STORY-032 — unaffected directly; still Blocked on STORY-036, not yet
-  built.
+  STORY-054 — unaffected directly; still Blocked on STORY-036.
+- **STORY-036 — Authentication**: unaffected directly (depends on
+  STORY-007 ✅, STORY-012 ✅, not STORY-054) — already Ready.
+- **STORY-021 — Scheduled Refresh**: literal `Dependencies` field is
+  "STORY-016, STORY-054" — both now ✅ (STORY-016 was already complete;
+  the approved STORY-054 plan's own Cross-Story Impact section
+  under-stated this dependency as STORY-016 only, an oversight caught and
+  corrected here on a fresh direct re-read of `requirement.md` during
+  implementation). **STORY-021 is now Ready** (not implemented).
 - **STORY-026 — Advanced/Cross-Source Deduplication** (P3) remains Ready
   (STORY-025 ✅, STORY-018 ✅, STORY-019 ✅) but is explicitly the lowest
   priority among currently-Ready Stories.
-- Other genuinely-Ready Stories, all P1/P2: **STORY-035** (Job Search UI,
-  P1, newly Ready — see above), **STORY-043** (Security Hardening, P1),
-  **STORY-045** (Rate Limiting, P1), **STORY-052** (Health Checks, P1),
-  **STORY-054** (Automated Testing Strategy, P1), **STORY-049** (Responsive
-  UI, P2), **STORY-050** (Structured Logging, P2), **STORY-055** (Backups,
-  P2).
+- Other genuinely-Ready Stories, all P1/P2: **STORY-049** (Responsive UI,
+  P2 — a baseline exists from STORY-035, but its own AC is not separately
+  verified), **STORY-050** (Structured Logging, P2), **STORY-055**
+  (Backups, P2).
 
-**Not yet approved for implementation** — nothing beyond STORY-032 has been
+**Not yet approved for implementation** — nothing beyond STORY-054 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.

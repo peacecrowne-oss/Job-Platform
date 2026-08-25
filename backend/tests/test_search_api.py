@@ -5,6 +5,14 @@ dependency-injection shape rather than patching internals. Real end-to-end
 matching/pagination behavior against a live database was validated
 manually during implementation (see progress.md), matching this repo's
 established convention.
+
+`search_rate_limit` (STORY-045) is also overridden to a no-op by default
+for the same reason `get_db` is -- without this, every test in this file
+would make a real (failing, ~2s-timeout) connection attempt to Redis at
+the Docker-only `redis` hostname, since almost none of these tests care
+about rate-limiting behavior specifically. The rate-limiting tests below
+restore the real dependency (with a mocked Redis client) for the duration
+of the single test that needs it.
 """
 
 from __future__ import annotations
@@ -12,8 +20,10 @@ from __future__ import annotations
 import datetime
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.api.search import search_rate_limit
 from app.db import get_db
 from app.main import app
 from app.models.job import Job
@@ -54,10 +64,12 @@ client = TestClient(app)
 
 def setup_module(module) -> None:
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[search_rate_limit] = lambda: None
 
 
 def teardown_module(module) -> None:
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(search_rate_limit, None)
 
 
 def test_search_endpoint_reachable(monkeypatch) -> None:
@@ -511,3 +523,152 @@ def test_sort_not_echoed_in_response(monkeypatch) -> None:
     monkeypatch.setattr(search_module, "search_jobs", lambda session, q, *, limit, offset, **kwargs: [])
     response = client.get("/jobs/search", params={"sort": "posting_date"})
     assert "sort" not in response.json()
+
+
+# --- STORY-043: input validation bounds on the free-text filters ---
+
+
+@pytest.mark.parametrize(
+    ("param", "at_limit_length"),
+    [("seniority", 100), ("company", 255), ("location_country", 255),
+     ("location_region", 255), ("location_city", 255)],
+)
+def test_free_text_filter_at_max_length_is_accepted(monkeypatch, param, at_limit_length) -> None:
+    monkeypatch.setattr(
+        "app.api.search.search_jobs", lambda session, q, *, limit, offset, **kwargs: []
+    )
+    response = client.get("/jobs/search", params={param: "x" * at_limit_length})
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("param", "over_limit_length"),
+    [("seniority", 101), ("company", 256), ("location_country", 256),
+     ("location_region", 256), ("location_city", 256)],
+)
+def test_free_text_filter_over_max_length_returns_422(param, over_limit_length) -> None:
+    response = client.get("/jobs/search", params={param: "x" * over_limit_length})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("param", ["seniority", "company", "location_country", "location_region", "location_city"])
+def test_free_text_filter_at_max_repeated_values_is_accepted(monkeypatch, param) -> None:
+    monkeypatch.setattr(
+        "app.api.search.search_jobs", lambda session, q, *, limit, offset, **kwargs: []
+    )
+    response = client.get("/jobs/search", params={param: ["v"] * 20})
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("param", ["seniority", "company", "location_country", "location_region", "location_city"])
+def test_free_text_filter_over_max_repeated_values_returns_422(param) -> None:
+    response = client.get("/jobs/search", params={param: ["v"] * 21})
+    assert response.status_code == 422
+
+
+def test_work_mode_at_max_repeated_values_is_accepted(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.api.search.search_jobs", lambda session, q, *, limit, offset, **kwargs: []
+    )
+    response = client.get(
+        "/jobs/search", params={"work_mode": ["remote", "hybrid", "on_site"]}
+    )
+    assert response.status_code == 200
+
+
+def test_work_mode_over_max_repeated_values_returns_422() -> None:
+    response = client.get(
+        "/jobs/search",
+        params={"work_mode": ["remote", "hybrid", "on_site", "remote"]},
+    )
+    assert response.status_code == 422
+
+
+def test_employment_type_over_max_repeated_values_returns_422() -> None:
+    response = client.get(
+        "/jobs/search",
+        params={
+            "employment_type": [
+                "full_time", "part_time", "contract", "temporary",
+                "internship", "apprenticeship", "other", "full_time",
+            ]
+        },
+    )
+    assert response.status_code == 422
+
+
+# --- STORY-045: rate limiting ---
+
+
+def _with_real_rate_limit(monkeypatch, fake_redis_client):
+    """These 3 tests specifically exercise rate-limiting, so they restore
+    the real search_rate_limit dependency (removed by default in
+    setup_module) for their own duration, backed by a mocked Redis client
+    -- never a real connection."""
+    import app.rate_limit as rate_limit_module
+
+    monkeypatch.setattr(rate_limit_module, "get_redis_client", lambda: fake_redis_client)
+    app.dependency_overrides.pop(search_rate_limit, None)
+    monkeypatch.setattr(
+        "app.api.search.search_jobs", lambda session, q, *, limit, offset, **kwargs: []
+    )
+
+
+def test_search_returns_429_with_retry_after_when_rate_limited(monkeypatch) -> None:
+    from unittest.mock import MagicMock
+
+    fake_client = MagicMock()
+    fake_pipe = MagicMock()
+    fake_client.pipeline.return_value = fake_pipe
+    fake_pipe.execute.return_value = [9999, True]  # far over any configured limit
+    _with_real_rate_limit(monkeypatch, fake_client)
+
+    try:
+        response = client.get("/jobs/search")
+    finally:
+        app.dependency_overrides[search_rate_limit] = lambda: None
+
+    assert response.status_code == 429
+    assert "Retry-After" in response.headers
+    body = response.json()
+    assert "error" in body
+
+
+def test_search_succeeds_when_within_rate_limit(monkeypatch) -> None:
+    from unittest.mock import MagicMock
+
+    fake_client = MagicMock()
+    fake_pipe = MagicMock()
+    fake_client.pipeline.return_value = fake_pipe
+    fake_pipe.execute.return_value = [1, True]
+    _with_real_rate_limit(monkeypatch, fake_client)
+
+    try:
+        response = client.get("/jobs/search")
+    finally:
+        app.dependency_overrides[search_rate_limit] = lambda: None
+
+    assert response.status_code == 200
+
+
+def test_search_succeeds_when_redis_unavailable(monkeypatch) -> None:
+    """Fail open, per app/redis_client.py's own established precedent."""
+    from redis.exceptions import RedisError
+
+    import app.rate_limit as rate_limit_module
+
+    def _raise():
+        raise RedisError("boom")
+
+    monkeypatch.setattr(rate_limit_module, "get_redis_client", lambda: _raise())
+    app.dependency_overrides.pop(search_rate_limit, None)
+    monkeypatch.setattr(
+        "app.api.search.search_jobs", lambda session, q, *, limit, offset, **kwargs: []
+    )
+
+    try:
+        response = client.get("/jobs/search")
+    finally:
+        app.dependency_overrides[search_rate_limit] = lambda: None
+
+    assert response.status_code == 200
