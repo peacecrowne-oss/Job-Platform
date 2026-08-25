@@ -4,15 +4,17 @@ Implements exactly what requirement.md's functional requirements name: name,
 connector type, config, enabled flag, last-run summary. `company_id` is a
 deliberate, explicitly-approved *extension* beyond that literal list (see
 the model docstring below for why) — everything else some implementers might
-expect (`base_url`, `refresh_interval_minutes`) is intentionally absent:
+expect (`base_url`) is intentionally absent:
 
 - Per-connector identifying info (board tokens, org slugs, feed URLs) belongs
   inside `config` (JSONB) — the Technical note says config is "validated per
   connector," which only makes sense if different connector types can store
   different shapes there, not a single fixed `base_url` column.
-- `refresh_interval_minutes` is STORY-021's own functional requirement
-  ("per-source interval override") — added by STORY-021's migration when
-  that Story is approved, not modeled ahead of it here.
+
+`refresh_interval_minutes` (STORY-021) is nullable: `NULL` means "use the
+platform's configured `default_refresh_interval_minutes`" (STORY-021's own
+technical note: "per-source interval override; default global interval").
+Not derived/cached anywhere else — the orchestrator reads it directly.
 
 `connector_type` is a permissive string, not a native enum or a
 CHECK-constrained closed set: requirement.md only names `greenhouse`
@@ -44,6 +46,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     func,
     text,
@@ -74,6 +77,10 @@ class Source(Base):
         CheckConstraint(
             "connector_type <> ''", name="ck_sources_connector_type_not_empty"
         ),
+        CheckConstraint(
+            "refresh_interval_minutes IS NULL OR refresh_interval_minutes > 0",
+            name="ck_sources_refresh_interval_minutes_positive",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -98,6 +105,9 @@ class Source(Base):
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+
+    # STORY-021: NULL means "use Settings.default_refresh_interval_minutes".
+    refresh_interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     last_run_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 

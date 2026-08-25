@@ -120,6 +120,43 @@ def db_session(_postgres_test_db: str | None) -> Session:
         engine.dispose()
 
 
+# STORY-021: unlike `db_session` above, code under test here (the ingestion
+# orchestrator) calls `session.commit()` itself, more than once, as part of
+# its own approved transaction-boundary design -- a Session bound to a
+# connection with an already-open outer transaction would need SQLAlchemy's
+# SAVEPOINT-restarting "join an external transaction" machinery to make
+# those inner commits safe to roll back, which `db_session` above doesn't
+# have. Simpler and just as safe here: a plain, real Session against the
+# same isolated `job_platform_test` database (same safety guard, same
+# unreachable-Postgres skip), with an explicit TRUNCATE of the tables this
+# fixture touches before *and* after each test -- safe specifically because
+# this is always the already-guarded, disposable test database, never an
+# arbitrary one.
+_TRUNCATE_TABLES = ("ingestion_runs", "jobs", "sources")
+
+
+@pytest.fixture
+def db_session_committing(_postgres_test_db: str | None) -> Session:
+    if _postgres_test_db is None:
+        pytest.skip("Postgres is not reachable -- start Docker Compose to run integration tests")
+
+    engine = create_engine(_postgres_test_db, connect_args={"connect_timeout": 2})
+    session = sessionmaker(bind=engine)()
+
+    def _truncate() -> None:
+        session.execute(text(f"TRUNCATE {', '.join(_TRUNCATE_TABLES)} RESTART IDENTITY CASCADE"))
+        session.commit()
+
+    _truncate()
+    try:
+        yield session
+    finally:
+        session.rollback()
+        _truncate()
+        session.close()
+        engine.dispose()
+
+
 class RedisTestNamespace:
     """Wraps a real Redis client bound to the isolated test DB index.
     Cleanup deletes only keys explicitly tracked via `.key()`/`.track()`

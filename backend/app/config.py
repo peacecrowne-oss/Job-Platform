@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     # collide with or destroy development data. Not a secret.
     test_database_url: str = "postgresql+psycopg2://job_platform:changeme@postgres:5432/job_platform_test"
     test_redis_url: str = "redis://redis:6379/1"
+    # STORY-021: global fallback used when Source.refresh_interval_minutes
+    # is NULL ("default global interval", the Story's own technical note).
+    # Not a secret.
+    default_refresh_interval_minutes: int = 60
+    # How often the scheduler process wakes to check for due sources. Not a
+    # secret.
+    scheduler_poll_interval_seconds: int = 60
+    # Lets the scheduler container no-op without removing it from Compose.
+    # Not a secret.
+    scheduler_enabled: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

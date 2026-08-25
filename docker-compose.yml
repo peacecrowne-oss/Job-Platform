@@ -76,5 +76,24 @@ services:
       timeout: 5s
       retries: 5
 
+  scheduler:
+    # STORY-021: reuses the backend image/context (no duplicated
+    # application source, no second Dockerfile) with a different command --
+    # a long-running loop instead of the HTTP server. No ports: it's not a
+    # request/response service. `restart: unless-stopped` is new to this
+    # file -- justified specifically because this is a background loop
+    # process, unlike the request/response services above, which Docker's
+    # own healthcheck+depends_on already manage access to.
+    build:
+      context: ./backend
+    command: ["python", "-m", "app.ingestion.scheduler"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:

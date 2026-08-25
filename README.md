@@ -62,11 +62,16 @@
 > `alembic check` and `pip-audit`, frontend tests/build/`npm audit`, and a
 > `docker compose config` syntax check; lint/backend-type-check are a
 > documented, deliberate gap since neither is configured anywhere in this
-> repository) exist so far. No connector-to-persistence orchestration has
-> been implemented yet — nothing currently calls the upsert or the retry
-> wrapper automatically from a live source; the `jobs` table itself is
-> empty again (validated with real inserts during implementation, since
-> removed). See
+> repository), and scheduled refresh (STORY-021 — a dedicated `scheduler`
+> Docker Compose service, reusing the backend image, that automatically
+> runs every enabled, due `Source`'s connector on a configurable interval
+> — no Celery/APScheduler/cron dependency added; a Postgres session-scoped
+> advisory lock prevents overlapping runs across processes with no TTL to
+> reason about; a manual CLI (`scripts/run_ingestion.py`) exposes the same
+> orchestration independent of the scheduler loop) exist so far. The `jobs`
+> table itself is empty again after each Story's own validation inserts
+> (since removed) — nothing has been left running against real external
+> sources by default. See
 > [`progress.md`](progress.md) for the exact current state and
 > [`requirement.md`](requirement.md) for the full requirements and Story
 > backlog.
@@ -256,6 +261,15 @@ backend/app/ingestion/dedup.py  upsert_job()/upsert_batch() -- exact deduplicati
                                  keyed on (source, source_job_id) (STORY-025)
 backend/app/ingestion/retry.py  with_retry() -- bounded exponential backoff +
                                  jitter for transient connector failures (STORY-022)
+backend/app/ingestion/orchestrator.py  run_source()/run_all_due_sources() -- the
+                                 shared ingestion pipeline wiring STORY-017/022/
+                                 025/027/015 together (STORY-021)
+backend/app/ingestion/locking.py  Postgres session-scoped advisory lock preventing
+                                   overlapping refreshes of the same Source (STORY-021)
+backend/app/ingestion/scheduler.py  Scheduler process entry point -- thin polling
+                                     loop around the orchestrator (STORY-021)
+backend/scripts/run_ingestion.py  Manual/one-off ingestion CLI, independent of the
+                                   scheduler loop (STORY-021)
 backend/tests/          Backend test suite (pytest; no live infra required)
 backend/requirements.txt      Pinned runtime dependencies (incl. SQLAlchemy,
                                psycopg2-binary, redis)
@@ -346,12 +360,15 @@ cp .env.example .env   # if you haven't already
 docker compose up -d --build
 ```
 
-This builds and starts all 4 services — `backend`, `frontend`, `postgres`,
-`redis` — wired together on one Docker network, reading configuration from the
-same root `.env` used for local (non-Docker) development. `backend` waits for
-`postgres` and `redis` to report healthy (via their own healthchecks, not a fixed
-sleep) before starting; each service has its own healthcheck. Verify everything
-came up:
+This builds and starts all 5 services — `backend`, `frontend`, `postgres`,
+`redis`, `scheduler` — wired together on one Docker network, reading configuration
+from the same root `.env` used for local (non-Docker) development. `backend`/
+`scheduler` wait for `postgres` and `redis` to report healthy (via their own
+healthchecks, not a fixed sleep) before starting; each request/response service
+has its own healthcheck. `scheduler` (STORY-021) reuses the `backend` image with
+a different command — a background polling loop, not an HTTP server — so it has
+no healthcheck of its own and no published port; `restart: unless-stopped` keeps
+it running across a crash. Verify everything came up:
 
 ```bash
 docker compose ps

@@ -38,14 +38,14 @@ def test_baseline_revision_has_no_parent() -> None:
     assert "baseline" in (roots[0].doc or "").lower()
 
 
-def test_head_revision_is_the_add_job_indexes_migration() -> None:
-    """STORY-057 chained a new migration onto STORY-015's — the head moved
-    again. (This is the fifth time this exact test has needed updating —
-    STORY-009→010, STORY-010→011, STORY-011→014, STORY-014→015, now
-    STORY-015→057 — a cheap, mechanical adjustment each time. Worth
-    generalizing in a future Story if this keeps recurring, but not part of
-    STORY-057's approved scope to refactor now.)"""
+def test_head_revision_is_the_add_source_refresh_interval_migration() -> None:
+    """STORY-021 chained a new migration onto STORY-057's — the head moved
+    again. (This is the sixth time this exact test has needed updating —
+    STORY-009→010, STORY-010→011, STORY-011→014, STORY-014→015,
+    STORY-015→057, now STORY-057→021 — a cheap, mechanical adjustment each
+    time. Worth generalizing in a future Story if this keeps recurring, but
+    not part of STORY-021's approved scope to refactor now.)"""
     script = ScriptDirectory.from_config(_alembic_config())
     head = script.get_revision(script.get_heads()[0])
     assert head.down_revision is not None
-    assert "add job indexes" in (head.doc or "").lower()
+    assert "add source refresh_interval_minutes" in (head.doc or "").lower()

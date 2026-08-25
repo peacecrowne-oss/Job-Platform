@@ -22,7 +22,7 @@ def test_required_columns_are_not_nullable() -> None:
 
 
 def test_optional_columns_are_nullable() -> None:
-    for name in ("company_id", "last_run_summary"):
+    for name in ("company_id", "last_run_summary", "refresh_interval_minutes"):
         assert _column(name).nullable is True, f"{name} should be nullable"
 
 
@@ -52,9 +52,16 @@ def test_company_id_is_nullable_foreign_key_with_set_null() -> None:
     assert fk.ondelete == "SET NULL"
 
 
-def test_no_speculative_scheduling_columns_invented() -> None:
-    """base_url and refresh_interval_minutes deliberately don't exist yet —
-    base_url belongs inside config (JSONB); refresh_interval_minutes is
-    STORY-021's own field to add later."""
-    for invented in ("base_url", "refresh_interval_minutes"):
-        assert invented not in Source.__table__.columns
+def test_no_speculative_columns_invented() -> None:
+    """base_url deliberately doesn't exist — per-connector identifying
+    info belongs inside config (JSONB), not a single fixed column."""
+    assert "base_url" not in Source.__table__.columns
+
+
+def test_refresh_interval_minutes_check_constraint_exists() -> None:
+    """STORY-021: NULL (use the global default) or a positive integer —
+    zero/negative intervals are rejected at the schema level."""
+    check_names = {
+        c.name for c in Source.__table__.constraints if isinstance(c, CheckConstraint)
+    }
+    assert "ck_sources_refresh_interval_minutes_positive" in check_names
