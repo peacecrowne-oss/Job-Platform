@@ -18,11 +18,27 @@ separate specifically so this module stays trivially testable and usable
 from a one-off CLI command (backend/scripts/run_ingestion.py) or a future
 external scheduler.
 
-STORY-023 boundary (flagged in the approved plan, not silently absorbed):
-`run_all_due_sources()` catches exceptions per-source only so one broken
-source can't stop the loop from reaching the next one -- it does not
-implement STORY-023's own literal ask for a real, separate task/process
-boundary. That remains STORY-023's job.
+STORY-023: `run_all_due_sources()` submits each due source's refresh to a
+`ThreadPoolExecutor` -- a "task boundary" (the FR's own textual
+alternative to a full OS process), not just an in-process try/except.
+Each worker thread opens its *own* DB session (a SQLAlchemy Session isn't
+thread-safe to share) and acquires the STORY-021 advisory lock itself,
+inside that thread -- functionally identical to before, just relocated to
+whichever connection is actually doing the work, since Postgres advisory
+locks are inherently multi-connection-safe. `run_source()` itself is
+unchanged: it already does exactly what "caught, logged, and recorded
+against that source's run only" requires. A per-source
+`future.result(timeout=ingestion_source_timeout_seconds)` additionally
+isolates a hung connector, not just an unhandled exception -- the FR's own
+"boundary" wording implies this even though the literal AC only tests an
+exception. A timed-out thread is abandoned, not killed (Python can't force
+-interrupt one); its own IngestionRun row (already created as `running` by
+`run_source()`'s first action) may still be updated later if the thread
+eventually finishes, or may remain `running` if it's genuinely hung -- the
+same accepted trade-off already used by STORY-052's health-check timeout,
+not a new policy invented here. Real process-crash isolation
+(ProcessPoolExecutor) was evaluated and explicitly not chosen -- see the
+approved plan's Architecture Decision.
 
 `source=source.connector_type` passed to upsert_batch() reuses the exact
 convention already established by STORY-010/025's own tests (a Job's
@@ -33,10 +49,14 @@ not invented here.
 from __future__ import annotations
 
 import logging
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 # Imported for their registration side effect only (mirrors alembic/env.py's
 # own model-import pattern) -- nothing here calls Greenhouse/Ashby directly.
@@ -153,24 +173,68 @@ def run_source(session: Session, source: Source) -> IngestionRun:
     return run
 
 
+def _run_isolated(engine: Engine, source_id: uuid.UUID) -> IngestionRun | None:
+    """The STORY-023 task boundary: runs one source's refresh on its own
+    session/connection, in its own thread. `expire_on_commit=False` so the
+    already-committed, returned IngestionRun's attributes stay readable
+    from the caller's thread after this worker's own session closes.
+    Returns None if the source is already locked by another run in
+    progress (skipped, not queued or retried)."""
+    worker_session = sessionmaker(bind=engine, expire_on_commit=False)()
+    try:
+        source = worker_session.get(Source, source_id)
+        with source_refresh_lock(engine, source_id) as acquired:
+            if not acquired:
+                logger.info("Skipping source %s -- refresh already in progress", source_id)
+                return None
+            return run_source(worker_session, source)
+    finally:
+        worker_session.close()
+
+
 def run_all_due_sources(session: Session) -> list[IngestionRun]:
-    """Runs every enabled, due source once. A source already locked by
-    another process (concurrent run in progress) is skipped, not queued or
-    retried. One broken source's exception never stops the others from
-    running (STORY-021's own minimum need -- not STORY-023's real task/
-    process isolation, see module docstring)."""
+    """Runs every enabled, due source once, each in its own thread (STORY-
+    023's task boundary) -- an unhandled exception, or a hang past
+    `ingestion_source_timeout_seconds`, in one source's connector never
+    prevents the others from running. Concurrency is bounded by
+    `ingestion_max_concurrent_sources`."""
     engine = session.get_bind()
     sources = session.execute(select(Source).where(Source.enabled.is_(True))).scalars().all()
+    due_source_ids = [source.id for source in sources if _is_due(session, source)]
 
+    if not due_source_ids:
+        return []
+
+    settings = get_settings()
     runs: list[IngestionRun] = []
-    for source in sources:
-        if not _is_due(session, source):
-            continue
-
-        with source_refresh_lock(engine, source.id) as acquired:
-            if not acquired:
-                logger.info("Skipping source %s -- refresh already in progress", source.id)
-                continue
-            runs.append(run_source(session, source))
+    # Not `with ThreadPoolExecutor(...) as pool:` -- that context manager's
+    # own __exit__ calls shutdown(wait=True), which would block here until
+    # even an abandoned, timed-out thread finishes, defeating the whole
+    # point of the per-source timeout below (the same pool-shutdown pitfall
+    # already solved once in app/api/health.py's STORY-052 readiness check).
+    pool = ThreadPoolExecutor(max_workers=settings.ingestion_max_concurrent_sources)
+    try:
+        futures = {
+            pool.submit(_run_isolated, engine, source_id): source_id
+            for source_id in due_source_ids
+        }
+        for future, source_id in futures.items():
+            try:
+                result = future.result(timeout=settings.ingestion_source_timeout_seconds)
+                if result is not None:
+                    runs.append(result)
+            except FutureTimeoutError:
+                logger.warning(
+                    "Source %s exceeded %ss and was abandoned -- its "
+                    "IngestionRun may still be updated later by the "
+                    "still-running thread, or may remain 'running' if it's "
+                    "genuinely hung",
+                    source_id,
+                    settings.ingestion_source_timeout_seconds,
+                )
+            except Exception:  # noqa: BLE001 -- one source's unexpected error must not stop the rest
+                logger.exception("Unexpected error isolating source %s", source_id)
+    finally:
+        pool.shutdown(wait=False)
 
     return runs

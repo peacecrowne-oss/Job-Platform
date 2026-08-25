@@ -8,6 +8,7 @@ depend on live infrastructure beyond Postgres itself.
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
@@ -28,6 +29,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 class _FakeConnectorConfig(BaseModel):
     records: list[dict[str, Any]] = []
     fail_times: int = 0
+    always_raise: bool = False  # STORY-023: simulates "a connector that always raises"
+    sleep_seconds: float = 0.0  # STORY-023: simulates a hung connector
 
 
 @register_connector("orchestrator_test_fake")
@@ -40,6 +43,10 @@ class _FakeConnector(BaseConnector):
 
     def fetch(self):
         self._call_count += 1
+        if self.config.always_raise:
+            raise RuntimeError("boom -- this connector always raises")
+        if self.config.sleep_seconds:
+            time.sleep(self.config.sleep_seconds)
         if self._call_count <= self.config.fail_times:
             raise ConnectorTransportError("simulated transient failure")
         return iter(self.config.records)
@@ -235,3 +242,66 @@ def test_duplicate_concurrent_execution_is_prevented(db_session_committing, _pos
             assert runs == []
     finally:
         other_engine.dispose()
+
+
+# --- STORY-023: per-source failure isolation ---
+
+
+def test_connector_that_always_raises_does_not_block_other_sources(db_session_committing) -> None:
+    broken = _make_source(db_session_committing, name="Broken", config={"always_raise": True})
+    healthy = _make_source(
+        db_session_committing, name="Healthy", config={"records": [_record("1")]}
+    )
+
+    runs = run_all_due_sources(db_session_committing)
+
+    runs_by_source = {run.source_id: run for run in runs}
+    assert runs_by_source[broken.id].status == "failed"
+    assert "boom" in (runs_by_source[broken.id].error_summary or "")
+    assert runs_by_source[healthy.id].status == "success"
+    assert runs_by_source[healthy.id].jobs_created == 1
+
+
+def test_hung_connector_is_abandoned_after_timeout_and_others_still_run(
+    db_session_committing, monkeypatch
+) -> None:
+    from app.config import get_settings
+
+    # Short enough that the abandoned thread's own sleep doesn't meaningfully
+    # extend this test file's runtime, long enough to be clearly
+    # distinguishable from the shortened timeout below.
+    monkeypatch.setattr(get_settings(), "ingestion_source_timeout_seconds", 0.2)
+
+    hung = _make_source(db_session_committing, name="Hung", config={"sleep_seconds": 1.0})
+    healthy = _make_source(
+        db_session_committing, name="Healthy", config={"records": [_record("1")]}
+    )
+
+    start = time.monotonic()
+    runs = run_all_due_sources(db_session_committing)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 1.0  # did not wait for the hung connector's full sleep
+    runs_by_source = {run.source_id: run for run in runs}
+    assert healthy.id in runs_by_source
+    assert runs_by_source[healthy.id].status == "success"
+    assert hung.id not in runs_by_source  # abandoned -- not returned by this cycle
+
+
+def test_concurrency_is_bounded_by_max_concurrent_sources(db_session_committing, monkeypatch) -> None:
+    """A due-source count larger than the configured worker limit still
+    completes all of them -- just not all literally simultaneously."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "ingestion_max_concurrent_sources", 1)
+
+    sources = [
+        _make_source(db_session_committing, name=f"S{i}", config={"records": [_record(str(i))]})
+        for i in range(3)
+    ]
+
+    runs = run_all_due_sources(db_session_committing)
+
+    assert len(runs) == 3
+    assert all(run.status == "success" for run in runs)
+    assert {run.source_id for run in runs} == {s.id for s in sources}

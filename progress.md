@@ -2279,10 +2279,10 @@ STORY-004/013 sequencing gap already recorded above (still unedited, per scope).
 None in progress. STORY-001, STORY-002, STORY-003, STORY-004, STORY-005,
 STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
-STORY-019, STORY-020, STORY-021, STORY-022, STORY-025, STORY-027, STORY-029,
-STORY-030, STORY-031, STORY-032, STORY-033, STORY-035, STORY-043,
+STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-025, STORY-027,
+STORY-029, STORY-030, STORY-031, STORY-032, STORY-033, STORY-035, STORY-043,
 STORY-045, STORY-046, STORY-052, STORY-053, STORY-054, and STORY-057 are
-complete — **37 Stories, all at 100%**; no Story is currently in flight.
+complete — **38 Stories, all at 100%**; no Story is currently in flight.
 
 ## Prioritized Backlog
 
@@ -3778,11 +3778,75 @@ TypeScript") and it passed with 0 errors on every build run above.
   orchestrator/source-model, live-verified against the real Docker stack).
   No changes to any existing Story's own dependency-satisfying behavior;
   no live external ATS calls made or approved.
+- **STORY-023 — Per-Source Failure Isolation** — **complete, 100%**.
+  `run_source()` (STORY-021) is unchanged — it already does exactly what
+  "caught, logged, and recorded against that source's run only" requires.
+  What changed is `run_all_due_sources()`: each due source's refresh is
+  now submitted to a `ThreadPoolExecutor` (bounded by new
+  `ingestion_max_concurrent_sources`, default 2) instead of being called
+  directly in the loop, with each worker thread opening its own DB
+  session (a SQLAlchemy `Session` isn't thread-safe to share) and
+  acquiring STORY-021's advisory lock itself — functionally identical
+  locking semantics, just relocated to whichever connection is actually
+  doing the work, since Postgres advisory locks are inherently
+  multi-connection-safe. **Architecture decision, evaluated not
+  defaulted**: the literal FR's own phrasing — "separate **task**/process
+  boundary" — offers "task" as an explicit textual alternative to a full
+  OS process; chose `ThreadPoolExecutor` over `ProcessPoolExecutor`
+  because the literal AC's own test case is specifically an *unhandled
+  exception* ("a connector that always raises"), which threads fully
+  isolate, while a process pool would add real complexity this Windows
+  dev environment doesn't need (each worker needing its own session is
+  unavoidable either way, but `ProcessPoolExecutor` additionally requires
+  a picklable, importable worker function and behaves differently under
+  Windows's `spawn` start method) for a failure mode (a genuine process
+  crash) the literal text doesn't name. Real process-crash isolation
+  remains explicitly out of scope, flagged, not silently claimed as
+  covered. Also added a per-source `future.result(timeout=
+  ingestion_source_timeout_seconds)` (new setting, default 120s) —
+  isolates a *hung* connector too, not just an exception; the FR's own
+  "boundary" wording implies this even though the literal AC only tests
+  an exception. A timed-out thread is abandoned, not killed (Python can't
+  force-interrupt one) — its own `IngestionRun` row (already created as
+  `running` by `run_source()`'s first action) may still be updated later
+  if the thread eventually finishes, or may remain `running` if it's
+  genuinely hung — the exact same accepted trade-off already used by
+  STORY-052's health-check timeout design, not a new policy invented
+  here. **Real bug found and fixed during live-Docker validation, the
+  same pool-shutdown pitfall as STORY-052's own health-check**: the first
+  implementation used `with ThreadPoolExecutor(...) as pool:`, whose own
+  `__exit__` calls `shutdown(wait=True)` — meaning even though
+  `future.result(timeout=...)` correctly gave up waiting on a hung
+  source, the `with` block itself then blocked until that same abandoned
+  thread finished anyway, defeating the entire point of the timeout.
+  Caught by a real timing assertion in a live-Postgres test
+  (`elapsed < 1.0` failed at `1.037`), not by inspection — fixed by
+  constructing the pool manually and calling `pool.shutdown(wait=False)`
+  in a `finally`, matching `app/api/health.py`'s own established pattern
+  exactly. **Live Docker validation**: two real `Source` rows
+  (`connector_type="greenhouse"`, pointed at the same safe, non-resolving
+  placeholder host used for STORY-021's own validation — never real
+  Greenhouse/Ashby) were run via the manual CLI; both produced correctly,
+  independently recorded `IngestionRun` rows with `started_at` timestamps
+  within ~1ms of each other, `psql`-verified — direct proof the two
+  sources ran genuinely concurrently, not sequentially, not just that the
+  code compiled. Validation data removed afterward (0 rows confirmed in
+  both `sources` and `ingestion_runs`). Files created: none. Files
+  modified: `backend/app/ingestion/orchestrator.py`
+  (`run_all_due_sources()` rewritten; `run_source()` unchanged),
+  `backend/app/config.py` (+2 settings), `.env.example` (+2 vars),
+  `backend/tests/test_orchestrator.py` (+3 tests: always-raises isolation,
+  hung-connector timeout/abandonment, bounded-concurrency completion),
+  `README.md`, `progress.md`. Test suite: 443/443 passing (440
+  pre-existing + 3 new), live-verified against the real Docker stack; full
+  `alembic check` and `pip-audit` re-run clean (no schema change this
+  Story). No changes to `Job`/any model, no Alembic migration, no live
+  external ATS calls made or approved.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/025/027/029/030/031/032/033/035/043/045/046/052/053/054/057
-are done — **37 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/025/027/029/030/031/032/033/035/043/045/046/052/053/054/057
+are done — **38 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
 - **STORY-056 — Deployment**: `Dependencies: STORY-004 ✅, STORY-053 ✅` —
@@ -3801,18 +3865,12 @@ are done — **37 Stories, all at 100%**. Per the Implementation Sequence
   STORY-054 — unaffected directly; still Blocked on STORY-036.
 - **STORY-036 — Authentication**: unaffected directly (depends on
   STORY-007 ✅, STORY-012 ✅, not STORY-054) — already Ready.
-- **STORY-023 — Per-Source Failure Isolation**: `Dependencies: STORY-016 ✅,
-  STORY-021 ✅` — both now cleared. **STORY-023 is now Ready** (not
-  implemented; STORY-021 deliberately implemented only per-source
-  exception isolation within its own shared loop, not STORY-023's own
-  literal ask for a real, separate task/process boundary — flagged in the
-  approved STORY-021 plan and left entirely to STORY-023).
 - **STORY-024 — Source Health Monitoring**: `Dependencies: STORY-015 ✅,
-  STORY-023` — STORY-023 still not implemented. **Remains Blocked**,
-  unaffected by STORY-021 alone.
+  STORY-023 ✅` — both now cleared. **STORY-024 is now Ready** (not
+  implemented).
 - **STORY-028 — Freshness Tracking & Auto-Closure**: `Dependencies:
-  STORY-025 ✅, STORY-023` — same. **Remains Blocked**, unaffected by
-  STORY-021 alone.
+  STORY-025 ✅, STORY-023 ✅` — both now cleared. **STORY-028 is now
+  Ready** (not implemented).
 - **STORY-026 — Advanced/Cross-Source Deduplication** (P3) remains Ready
   (STORY-025 ✅, STORY-018 ✅, STORY-019 ✅) but is explicitly the lowest
   priority among currently-Ready Stories.
@@ -3821,6 +3879,6 @@ are done — **37 Stories, all at 100%**. Per the Implementation Sequence
   verified), **STORY-050** (Structured Logging, P2), **STORY-055**
   (Backups, P2).
 
-**Not yet approved for implementation** — nothing beyond STORY-021 has been
+**Not yet approved for implementation** — nothing beyond STORY-023 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.

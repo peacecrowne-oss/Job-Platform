@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     # Lets the scheduler container no-op without removing it from Compose.
     # Not a secret.
     scheduler_enabled: bool = True
+    # STORY-023: bounds how many due sources' refreshes run concurrently
+    # (ThreadPoolExecutor workers) -- named around the actual mechanism
+    # (threads, not OS processes; see the approved plan's Architecture
+    # Decision), not "processes". Not a secret.
+    ingestion_max_concurrent_sources: int = 2
+    # Per-source wall-clock bound on one refresh -- isolates a hung
+    # connector, not just an unhandled exception. Not a secret.
+    ingestion_source_timeout_seconds: float = 120.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

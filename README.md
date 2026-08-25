@@ -62,16 +62,20 @@
 > `alembic check` and `pip-audit`, frontend tests/build/`npm audit`, and a
 > `docker compose config` syntax check; lint/backend-type-check are a
 > documented, deliberate gap since neither is configured anywhere in this
-> repository), and scheduled refresh (STORY-021 — a dedicated `scheduler`
+> repository), scheduled refresh (STORY-021 — a dedicated `scheduler`
 > Docker Compose service, reusing the backend image, that automatically
 > runs every enabled, due `Source`'s connector on a configurable interval
 > — no Celery/APScheduler/cron dependency added; a Postgres session-scoped
 > advisory lock prevents overlapping runs across processes with no TTL to
 > reason about; a manual CLI (`scripts/run_ingestion.py`) exposes the same
-> orchestration independent of the scheduler loop) exist so far. The `jobs`
-> table itself is empty again after each Story's own validation inserts
-> (since removed) — nothing has been left running against real external
-> sources by default. See
+> orchestration independent of the scheduler loop), and per-source failure
+> isolation (STORY-023 — each due source's refresh runs in its own thread,
+> live-verified to run genuinely concurrently, not sequentially; an
+> unhandled exception or a hung connector past a configurable per-source
+> timeout in one source never blocks or delays the others) exist so far.
+> The `jobs` table itself is empty again after each Story's own validation
+> inserts (since removed) — nothing has been left running against real
+> external sources by default. See
 > [`progress.md`](progress.md) for the exact current state and
 > [`requirement.md`](requirement.md) for the full requirements and Story
 > backlog.
@@ -263,7 +267,9 @@ backend/app/ingestion/retry.py  with_retry() -- bounded exponential backoff +
                                  jitter for transient connector failures (STORY-022)
 backend/app/ingestion/orchestrator.py  run_source()/run_all_due_sources() -- the
                                  shared ingestion pipeline wiring STORY-017/022/
-                                 025/027/015 together (STORY-021)
+                                 025/027/015 together (STORY-021); each due
+                                 source runs in its own thread, bounded by a
+                                 per-source timeout (STORY-023)
 backend/app/ingestion/locking.py  Postgres session-scoped advisory lock preventing
                                    overlapping refreshes of the same Source (STORY-021)
 backend/app/ingestion/scheduler.py  Scheduler process entry point -- thin polling
