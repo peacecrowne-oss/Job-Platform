@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     # Per-source wall-clock bound on one refresh -- isolates a hung
     # connector, not just an unhandled exception. Not a secret.
     ingestion_source_timeout_seconds: float = 120.0
+    # STORY-024: how many of a source's most recent *finished* IngestionRuns
+    # (running rows never count) feed the success-rate calculation. Not a
+    # secret.
+    source_health_recent_run_count: int = 10
+    # STORY-024: consecutive failed runs at or above this count flags a
+    # source unhealthy. Not a secret.
+    source_unhealthy_consecutive_failures_threshold: int = 3
 
     model_config = SettingsConfigDict(
         env_file=".env",

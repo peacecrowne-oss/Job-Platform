@@ -18,7 +18,7 @@ exposes -- not a wildcard.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, search
+from app.api import health, search, sources
 from app.config import get_settings
 from app.errors import register_exception_handlers
 
@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(search.router)
+    app.include_router(sources.router)
 
     return app
 

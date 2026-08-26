@@ -68,14 +68,20 @@
 > — no Celery/APScheduler/cron dependency added; a Postgres session-scoped
 > advisory lock prevents overlapping runs across processes with no TTL to
 > reason about; a manual CLI (`scripts/run_ingestion.py`) exposes the same
-> orchestration independent of the scheduler loop), and per-source failure
+> orchestration independent of the scheduler loop), per-source failure
 > isolation (STORY-023 — each due source's refresh runs in its own thread,
 > live-verified to run genuinely concurrently, not sequentially; an
 > unhandled exception or a hung connector past a configurable per-source
-> timeout in one source never blocks or delays the others) exist so far.
-> The `jobs` table itself is empty again after each Story's own validation
-> inserts (since removed) — nothing has been left running against real
-> external sources by default. See
+> timeout in one source never blocks or delays the others), and source
+> health monitoring (STORY-024 — `GET /sources/health`, health derived
+> entirely from recent `IngestionRun` history — success rate, consecutive-
+> failure streak, last success time — never a cached field; a source
+> flips `healthy` -> `unhealthy` at a configurable consecutive-failure
+> threshold, and a source with no runs yet reads `unknown`, not
+> `unhealthy`; live-verified against real data for all three states)
+> exist so far. The `jobs` table itself is empty again after each Story's
+> own validation inserts (since removed) — nothing has been left running
+> against real external sources by default. See
 > [`progress.md`](progress.md) for the exact current state and
 > [`requirement.md`](requirement.md) for the full requirements and Story
 > backlog.
@@ -276,6 +282,10 @@ backend/app/ingestion/scheduler.py  Scheduler process entry point -- thin pollin
                                      loop around the orchestrator (STORY-021)
 backend/scripts/run_ingestion.py  Manual/one-off ingestion CLI, independent of the
                                    scheduler loop (STORY-021)
+backend/app/ingestion/health.py  compute_source_health()/list_all_source_health() --
+                                  health derived from IngestionRun history, never a
+                                  cached field (STORY-024)
+backend/app/api/sources.py  GET /sources/health (STORY-024)
 backend/tests/          Backend test suite (pytest; no live infra required)
 backend/requirements.txt      Pinned runtime dependencies (incl. SQLAlchemy,
                                psycopg2-binary, redis)

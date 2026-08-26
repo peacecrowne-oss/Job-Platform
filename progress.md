@@ -2279,10 +2279,11 @@ STORY-004/013 sequencing gap already recorded above (still unedited, per scope).
 None in progress. STORY-001, STORY-002, STORY-003, STORY-004, STORY-005,
 STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
-STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-025, STORY-027,
-STORY-029, STORY-030, STORY-031, STORY-032, STORY-033, STORY-035, STORY-043,
-STORY-045, STORY-046, STORY-052, STORY-053, STORY-054, and STORY-057 are
-complete — **38 Stories, all at 100%**; no Story is currently in flight.
+STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-024, STORY-025,
+STORY-027, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033, STORY-035,
+STORY-043, STORY-045, STORY-046, STORY-052, STORY-053, STORY-054, and
+STORY-057 are complete — **39 Stories, all at 100%**; no Story is currently
+in flight.
 
 ## Prioritized Backlog
 
@@ -3842,11 +3843,52 @@ TypeScript") and it passed with 0 errors on every build run above.
   `alembic check` and `pip-audit` re-run clean (no schema change this
   Story). No changes to `Job`/any model, no Alembic migration, no live
   external ATS calls made or approved.
+- **STORY-024 — Source Health Monitoring** — **complete, 100%**. Health is
+  *derived*, never a cached field — new `app/ingestion/health.py`
+  (`compute_source_health()`/`list_all_source_health()`) reads
+  `IngestionRun` (STORY-015) history directly, consistent with `Source`'s
+  own STORY-014 docstring ("not a source of truth STORY-014 should be
+  pre-designing") and this Story's own literal FR. `running` (in-flight)
+  runs are explicitly excluded from both the success-rate and consecutive-
+  failure calculations — only `success`/`failed` (finished) runs count,
+  live-verified. Two numeric thresholds the literal text leaves
+  unspecified — `source_health_recent_run_count` (10) and
+  `source_unhealthy_consecutive_failures_threshold` (3) — added as new,
+  flagged, configurable settings rather than guessed-and-hardcoded.
+  `last_success_at` is deliberately *not* bounded by the recent-run
+  window (a different question — "when did this last succeed at all" vs.
+  "how's it trending lately") — a source with an old success buried under
+  new consecutive failures still correctly reports both facts
+  simultaneously (`unhealthy` status, non-null `last_success_at`),
+  live-verified. New `GET /sources/health` (`app/api/sources.py`) exposes
+  every `Source`, not filtered to `enabled=True` — a disabled source's
+  history is still worth seeing. Rate-limited like `GET /jobs/search`
+  (reusing `app.rate_limit.rate_limit()`, a new `sources_health` scope) —
+  a flagged judgment call, since this endpoint is "internal" but, absent
+  STORY-036, technically as public as every other current route, so
+  `/health`'s Docker-polling-specific rate-limit exemption doesn't apply
+  here. **Live Docker validation**: three real `Source` rows (no live ATS
+  calls — pure DB rows plus manually-inserted `IngestionRun` history)
+  exercised all three literal states in one request — `healthy` (one
+  success), `unhealthy` (3 consecutive failures, the literal AC),
+  `unknown` (zero runs, the literal edge case) — `curl`'d directly against
+  the real running `backend` container and confirmed byte-for-byte
+  correct in the JSON response, not just asserted in a test. Validation
+  data removed afterward (0 rows confirmed in `sources`/`ingestion_runs`/
+  `jobs`). Files created: `backend/app/ingestion/health.py`,
+  `backend/app/api/sources.py`, `backend/tests/test_source_health.py` (8
+  tests), `backend/tests/test_sources_api.py` (4 tests). Files modified:
+  `backend/app/main.py` (+router), `backend/app/config.py` (+2 settings),
+  `.env.example` (+2 vars), `README.md`, `progress.md`. Test suite:
+  455/455 passing (443 pre-existing + 12 new), live-verified against the
+  real Docker stack; `alembic check` clean (no schema change this Story);
+  `pip-audit` clean. No changes to `Job`/any model, no Alembic migration,
+  no live external ATS calls made or approved.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/025/027/029/030/031/032/033/035/043/045/046/052/053/054/057
-are done — **38 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/029/030/031/032/033/035/043/045/046/052/053/054/057
+are done — **39 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
 - **STORY-056 — Deployment**: `Dependencies: STORY-004 ✅, STORY-053 ✅` —
@@ -3865,9 +3907,6 @@ are done — **38 Stories, all at 100%**. Per the Implementation Sequence
   STORY-054 — unaffected directly; still Blocked on STORY-036.
 - **STORY-036 — Authentication**: unaffected directly (depends on
   STORY-007 ✅, STORY-012 ✅, not STORY-054) — already Ready.
-- **STORY-024 — Source Health Monitoring**: `Dependencies: STORY-015 ✅,
-  STORY-023 ✅` — both now cleared. **STORY-024 is now Ready** (not
-  implemented).
 - **STORY-028 — Freshness Tracking & Auto-Closure**: `Dependencies:
   STORY-025 ✅, STORY-023 ✅` — both now cleared. **STORY-028 is now
   Ready** (not implemented).
@@ -3879,6 +3918,6 @@ are done — **38 Stories, all at 100%**. Per the Implementation Sequence
   verified), **STORY-050** (Structured Logging, P2), **STORY-055**
   (Backups, P2).
 
-**Not yet approved for implementation** — nothing beyond STORY-023 has been
+**Not yet approved for implementation** — nothing beyond STORY-024 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.
