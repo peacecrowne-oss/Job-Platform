@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     # STORY-024: consecutive failed runs at or above this count flags a
     # source unhealthy. Not a secret.
     source_unhealthy_consecutive_failures_threshold: int = 3
+    # STORY-028: global fallback used when Source.freshness_threshold_runs
+    # is NULL. A job not seen in this many consecutive successful runs of
+    # its source is auto-closed. Not a secret.
+    default_freshness_threshold_runs: int = 3
 
     model_config = SettingsConfigDict(
         env_file=".env",

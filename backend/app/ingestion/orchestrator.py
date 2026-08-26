@@ -75,6 +75,7 @@ from app.connectors.http_client import PolicyEnforcingHttpClient, SsrfSafeTransp
 from app.connectors.policy import require_source_authorized
 from app.connectors.registry import registry
 from app.ingestion.dedup import UpsertOutcome, upsert_batch
+from app.ingestion.freshness import close_stale_jobs
 from app.ingestion.locking import source_refresh_lock
 from app.ingestion.retry import RetryPolicy, with_retry
 from app.models.ingestion_run import IngestionRun
@@ -159,6 +160,19 @@ def run_source(session: Session, source: Source) -> IngestionRun:
         run.jobs_failed = jobs_failed
         run.finished_at = datetime.now(timezone.utc)
         session.commit()
+
+        # STORY-028: only after a successful run is marked and committed
+        # (so this run counts toward the "N successful runs" window) --
+        # never on the failed path, per this Story's own edge case. Its
+        # own try/except is deliberately separate from the outer one: a
+        # bug here must never retroactively mark an otherwise-successful
+        # ingestion run as failed.
+        try:
+            close_stale_jobs(session, source)
+            session.commit()
+        except Exception:  # noqa: BLE001 -- see comment above
+            session.rollback()
+            logger.exception("Freshness closure failed for source %s", source.id)
 
     except Exception as exc:  # noqa: BLE001 -- deliberate: any failure still completes the run
         session.rollback()

@@ -78,10 +78,19 @@
 > failure streak, last success time — never a cached field; a source
 > flips `healthy` -> `unhealthy` at a configurable consecutive-failure
 > threshold, and a source with no runs yet reads `unknown`, not
-> `unhealthy`; live-verified against real data for all three states)
-> exist so far. The `jobs` table itself is empty again after each Story's
-> own validation inserts (since removed) — nothing has been left running
-> against real external sources by default. See
+> `unhealthy`; live-verified against real data for all three states), and
+> freshness tracking / auto-closure (STORY-028 — a job not seen in a
+> configurable number of consecutive *successful* runs of its source is
+> auto-closed (`Job.closed_at`), excluded from default `GET /jobs/search`
+> results but still returned with `include_closed=true`; a source stuck
+> failing never closes anything, since only successful runs advance the
+> threshold — the literal "don't mass-close on an outage" edge case; a
+> closed job reappearing in a later run is reopened automatically;
+> live-verified end-to-end against the real Docker stack, including
+> through the real search API) exist so far. The `jobs` table itself is
+> empty again after each Story's own validation inserts (since removed) —
+> nothing has been left running against real external sources by default.
+> See
 > [`progress.md`](progress.md) for the exact current state and
 > [`requirement.md`](requirement.md) for the full requirements and Story
 > backlog.
@@ -286,6 +295,9 @@ backend/app/ingestion/health.py  compute_source_health()/list_all_source_health(
                                   health derived from IngestionRun history, never a
                                   cached field (STORY-024)
 backend/app/api/sources.py  GET /sources/health (STORY-024)
+backend/app/ingestion/freshness.py  close_stale_jobs() -- auto-closure derived
+                                     from IngestionRun/Job timestamps, no new
+                                     join table (STORY-028)
 backend/tests/          Backend test suite (pytest; no live infra required)
 backend/requirements.txt      Pinned runtime dependencies (incl. SQLAlchemy,
                                psycopg2-binary, redis)

@@ -305,3 +305,26 @@ def test_concurrency_is_bounded_by_max_concurrent_sources(db_session_committing,
     assert len(runs) == 3
     assert all(run.status == "success" for run in runs)
     assert {run.source_id for run in runs} == {s.id for s in sources}
+
+
+# --- STORY-028: freshness/auto-closure, end-to-end via run_source() ---
+
+
+def test_job_missing_from_enough_successful_runs_is_closed_end_to_end(db_session_committing) -> None:
+    source = _make_source(
+        db_session_committing,
+        freshness_threshold_runs=2,
+        config={"records": [_record("stays"), _record("disappears")]},
+    )
+
+    run_source(db_session_committing, source)  # both records present
+
+    source.config = {"records": [_record("stays")]}  # "disappears" no longer returned
+    db_session_committing.commit()
+    run_source(db_session_committing, source)  # 1st successful run without it
+    run_source(db_session_committing, source)  # 2nd successful run without it -- threshold met
+
+    stays = db_session_committing.query(Job).filter(Job.source_job_id == "stays").one()
+    disappears = db_session_committing.query(Job).filter(Job.source_job_id == "disappears").one()
+    assert stays.closed_at is None
+    assert disappears.closed_at is not None

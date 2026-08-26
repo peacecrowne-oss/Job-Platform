@@ -163,11 +163,15 @@ class TestSearchJobsQueryConstruction:
 
 class TestSearchJobsFiltering:
     def test_no_filters_adds_no_where_clause_beyond_search(self) -> None:
+        """STORY-028: the default `closed_at IS NULL` filter is always
+        present now -- this test's own name predates that and only ever
+        meant "no *facet* filter adds anything beyond search"."""
         session = _CapturingSession()
         search_jobs(session, "engineer", limit=20, offset=0)
         sql = _compiled_sql(session.captured_stmt)
         assert sql.count("WHERE") == 1
-        assert "AND" not in sql
+        assert sql.count(" AND ") == 1  # search predicate AND closed_at IS NULL, nothing more
+        assert "jobs.closed_at IS NULL" in sql
 
     def test_work_mode_filter_adds_in_clause(self) -> None:
         session = _CapturingSession()
@@ -234,15 +238,24 @@ class TestSearchJobsFiltering:
         search_jobs(session, "", limit=20, offset=0, work_mode=[], seniority=[])
         sql = _compiled_sql(session.captured_stmt)
         # work_mode/seniority still appear in the SELECT column list itself
-        # -- what matters is that no WHERE/IN constraint was added for them.
-        assert "WHERE" not in sql
+        # -- what matters is that no additional IN constraint was added for
+        # them. The default closed_at IS NULL filter (STORY-028) is always
+        # present, but it's not an "IN" constraint, so this assertion still
+        # correctly proves the empty-list filters added nothing.
         assert "IN" not in sql
+        assert "jobs.closed_at IS NULL" in sql
+        assert sql.count(" AND ") == 0  # only the standalone closed_at condition
 
     def test_none_filters_add_no_constraints(self) -> None:
+        """STORY-028: `WHERE` is always present now (the default
+        closed_at filter) -- this test's own name always meant "no facet
+        filter adds a constraint," not "no WHERE clause at all"."""
         session = _CapturingSession()
         search_jobs(session, "", limit=20, offset=0)
         sql = _compiled_sql(session.captured_stmt)
-        assert "WHERE" not in sql
+        assert sql.count("WHERE") == 1
+        assert "jobs.closed_at IS NULL" in sql
+        assert sql.count(" AND ") == 0
 
     def test_multiple_filters_combine_with_and(self) -> None:
         session = _CapturingSession()
@@ -251,10 +264,21 @@ class TestSearchJobsFiltering:
             work_mode=["remote"], employment_type=["full_time"], location_country=["Germany"],
         )
         sql = _compiled_sql(session.captured_stmt)
-        assert sql.count(" AND ") == 2  # 3 conditions -> 2 ANDs
+        # 3 facet conditions + the default closed_at IS NULL -> 3 ANDs.
+        assert sql.count(" AND ") == 3
         assert "jobs.work_mode IN" in sql
         assert "jobs.employment_type IN" in sql
         assert "jobs.location_country IN" in sql
+        assert "jobs.closed_at IS NULL" in sql
+
+    def test_include_closed_omits_the_default_closed_at_filter(self) -> None:
+        session = _CapturingSession()
+        search_jobs(session, "", limit=20, offset=0, include_closed=True)
+        sql = _compiled_sql(session.captured_stmt)
+        # closed_at still appears in the SELECT column list itself -- what
+        # matters is that no WHERE/IS NULL constraint was added for it.
+        assert "closed_at IS NULL" not in sql
+        assert "WHERE" not in sql
 
     def test_filters_compose_with_real_search_query(self) -> None:
         session = _CapturingSession()

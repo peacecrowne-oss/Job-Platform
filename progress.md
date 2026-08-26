@@ -2280,10 +2280,10 @@ None in progress. STORY-001, STORY-002, STORY-003, STORY-004, STORY-005,
 STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
 STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-024, STORY-025,
-STORY-027, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033, STORY-035,
-STORY-043, STORY-045, STORY-046, STORY-052, STORY-053, STORY-054, and
-STORY-057 are complete — **39 Stories, all at 100%**; no Story is currently
-in flight.
+STORY-027, STORY-028, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033,
+STORY-035, STORY-043, STORY-045, STORY-046, STORY-052, STORY-053, STORY-054,
+and STORY-057 are complete — **40 Stories, all at 100%**; no Story is
+currently in flight.
 
 ## Prioritized Backlog
 
@@ -3884,11 +3884,88 @@ TypeScript") and it passed with 0 errors on every build run above.
   real Docker stack; `alembic check` clean (no schema change this Story);
   `pip-audit` clean. No changes to `Job`/any model, no Alembic migration,
   no live external ATS calls made or approved.
+- **STORY-028 — Freshness Tracking & Auto-Closure** — **complete, 100%**.
+  Key design insight, not requiring a new join table linking runs to
+  jobs: "not seen in N consecutive runs" is fully determinable from
+  timestamps already maintained — if `Job.last_seen_at` predates the
+  Nth-most-recent **successful** `IngestionRun.started_at` for that job's
+  source, the job wasn't part of any of the last N successful runs
+  (being seen in any of them would have bumped `last_seen_at` to that
+  run's time or later). **Only successful runs count** toward the
+  threshold — this is exactly what satisfies the literal edge case ("a
+  source-wide outage must not mass-close every job... distinguish
+  'source failed to run' from 'source ran and job is gone'"): a source
+  stuck failing accumulates zero eligible runs no matter how many failed
+  attempts pile up, live-verified with 10 consecutive failed runs closing
+  nothing. If a source has fewer than N successful runs ever, nothing is
+  closed yet (not enough history to conclude anything) — also
+  live-verified. New `app/ingestion/freshness.py`
+  (`close_stale_jobs(session, source) -> int`), called from
+  `run_source()` (STORY-021) only on the success path, in its own nested
+  `try/except` deliberately separate from the outer one — a bug in
+  freshness closure must never retroactively mark an otherwise-successful
+  ingestion run as `failed`. **Material changes to four already-completed
+  Stories, flagged explicitly per the approved plan, not silently
+  absorbed**: (1) `app/ingestion/dedup.py`'s `upsert_job()` (STORY-025)
+  gained one unconditional line — `existing.closed_at = None` — resetting
+  a re-observed job's closure regardless of whether its content also
+  changed, verified both by a direct unit-style test and live against the
+  real dedup path (the live check's own `outcome` printed
+  `UpsertOutcome.CREATED` due to the manual test row lacking a
+  `content_hash`, a quirk of the throwaway validation script, not a real
+  connector path — `closed_at` still correctly reset to `NULL`,
+  confirmed via `psql`, since that line runs unconditionally on the
+  existing-row branch regardless of the outcome label). (2)
+  `app/ingestion/orchestrator.py` (STORY-021) gained the one closure-step
+  call described above. (3) `app/search/service.py`'s `search_jobs()`
+  (STORY-030–033) gained a default `WHERE closed_at IS NULL` filter plus
+  a new `include_closed: bool = False` parameter — 4 of that Story's own
+  pre-existing tests needed updating since they asserted "no WHERE clause
+  at all" when no facet filters were given, an assumption this Story's
+  own default filter necessarily changes (not a regression — their own
+  *intent*, "no facet filter adds anything," still holds and is now
+  asserted more precisely). (4) `app/api/search.py`'s `GET /jobs/search`
+  gained one new optional query parameter (`include_closed`) passed
+  straight through — satisfying "remains queryable historically" via the
+  one query surface that exists today (no job-detail-by-ID endpoint
+  exists yet — that's STORY-034). New `Job.closed_at` (nullable
+  timestamp — deliberately distinct from the source-provided
+  `closing_date`, an inference vs. a stated fact) and `Source.
+  freshness_threshold_runs` (nullable, mirrors `refresh_interval_minutes`'s
+  exact established per-source-override pattern) — one migration,
+  full upgrade/`alembic check`/downgrade/re-upgrade/`alembic check`
+  round-trip verified clean against real Postgres. **Live Docker
+  validation, end-to-end through the real search API**: a real source (2
+  successful runs, threshold 2), one fresh job and one stale job (real
+  Postgres rows) — `close_stale_jobs()` correctly closed exactly the
+  stale one; `curl`'d `GET /jobs/search?q=Role` returned only the open
+  job by default, `include_closed=true` returned both, byte-for-byte
+  confirmed in the JSON; a subsequent real `upsert_job()` call
+  reappearing that same stale job correctly reset `closed_at` to `NULL`,
+  confirmed via `psql`. Validation data removed afterward (0 rows
+  confirmed in `sources`/`jobs`/`ingestion_runs`). Files created:
+  `backend/app/ingestion/freshness.py`,
+  `backend/alembic/versions/8df3a134d9ed_add_job_closed_at_and_source_freshness_.py`,
+  `backend/tests/test_freshness.py` (7 tests). Files modified:
+  `backend/app/models/job.py` (+column), `backend/app/models/source.py`
+  (+column, +CHECK), `backend/app/ingestion/dedup.py` (+1 line),
+  `backend/app/ingestion/orchestrator.py` (+closure step, +1 test),
+  `backend/app/search/service.py` (+filter, +param),
+  `backend/app/api/search.py` (+query param), `backend/app/config.py`
+  (+1 setting), `backend/tests/test_alembic.py` (head-revision test
+  updated — the seventh time this exact, self-documented mechanical
+  update has recurred), `backend/tests/test_job_model.py` (+1 assertion),
+  `backend/tests/test_source_model.py` (+2 assertions),
+  `backend/tests/test_search_service.py` (4 tests updated + 1 new for
+  `include_closed`), `.env.example` (+1 var), `README.md`, `progress.md`.
+  Test suite: 465/465 passing (455 pre-existing + 10 new), live-verified
+  against the real Docker stack; full `alembic check` round-trip clean;
+  `pip-audit` clean. No live external ATS calls made or approved.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/029/030/031/032/033/035/043/045/046/052/053/054/057
-are done — **39 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/052/053/054/057
+are done — **40 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
 - **STORY-056 — Deployment**: `Dependencies: STORY-004 ✅, STORY-053 ✅` —
@@ -3907,9 +3984,6 @@ are done — **39 Stories, all at 100%**. Per the Implementation Sequence
   STORY-054 — unaffected directly; still Blocked on STORY-036.
 - **STORY-036 — Authentication**: unaffected directly (depends on
   STORY-007 ✅, STORY-012 ✅, not STORY-054) — already Ready.
-- **STORY-028 — Freshness Tracking & Auto-Closure**: `Dependencies:
-  STORY-025 ✅, STORY-023 ✅` — both now cleared. **STORY-028 is now
-  Ready** (not implemented).
 - **STORY-026 — Advanced/Cross-Source Deduplication** (P3) remains Ready
   (STORY-025 ✅, STORY-018 ✅, STORY-019 ✅) but is explicitly the lowest
   priority among currently-Ready Stories.
@@ -3918,6 +3992,6 @@ are done — **39 Stories, all at 100%**. Per the Implementation Sequence
   verified), **STORY-050** (Structured Logging, P2), **STORY-055**
   (Backups, P2).
 
-**Not yet approved for implementation** — nothing beyond STORY-024 has been
+**Not yet approved for implementation** — nothing beyond STORY-028 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.

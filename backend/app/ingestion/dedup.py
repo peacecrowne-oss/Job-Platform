@@ -183,6 +183,10 @@ def upsert_job(session: Session, source: str, record: NormalizedJobRecord) -> tu
         return job, UpsertOutcome.CREATED
 
     existing.last_seen_at = datetime.now(timezone.utc)
+    # STORY-028: a job that reappears is active again, regardless of
+    # whether its content also changed -- reset unconditionally, not only
+    # on the UPDATED branch below.
+    existing.closed_at = None
     outcome = classify_upsert(existing.content_hash, new_hash)
 
     if outcome is UpsertOutcome.UPDATED:

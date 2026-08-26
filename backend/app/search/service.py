@@ -103,6 +103,7 @@ def search_jobs(
     location_country: Sequence[str] | None = None,
     location_region: Sequence[str] | None = None,
     location_city: Sequence[str] | None = None,
+    include_closed: bool = False,
 ) -> list[Job]:
     """Returns up to `limit` Jobs, `offset` results in. `query`, when it has
     usable search terms, filters to jobs whose search vector matches it,
@@ -113,9 +114,14 @@ def search_jobs(
     default, unchanged). Every mode ends in a deterministic `id ASC`
     tie-break. Each faceted filter (STORY-031), when non-empty, ANDs in
     one additional constraint independent of `sort`; absent filters add
-    nothing."""
+    nothing. `include_closed` (STORY-028): jobs auto-closed via absence
+    (`Job.closed_at` set) are excluded by default -- "excluded from
+    default search results but remains queryable historically" -- passing
+    `include_closed=True` surfaces them too."""
     normalized = (query or "").strip()
     stmt = select(Job)
+    if not include_closed:
+        stmt = stmt.where(Job.closed_at.is_(None))
     has_query = _has_search_terms(normalized)
     search_vector = tsquery = None
 

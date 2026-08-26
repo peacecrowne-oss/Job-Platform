@@ -41,6 +41,7 @@ def test_optional_columns_are_nullable() -> None:
         "work_mode",
         "employment_type",
         "seniority",
+        "closed_at",
     ):
         assert _column(name).nullable is True, f"{name} should be nullable"
 

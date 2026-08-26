@@ -22,7 +22,12 @@ def test_required_columns_are_not_nullable() -> None:
 
 
 def test_optional_columns_are_nullable() -> None:
-    for name in ("company_id", "last_run_summary", "refresh_interval_minutes"):
+    for name in (
+        "company_id",
+        "last_run_summary",
+        "refresh_interval_minutes",
+        "freshness_threshold_runs",
+    ):
         assert _column(name).nullable is True, f"{name} should be nullable"
 
 
@@ -65,3 +70,11 @@ def test_refresh_interval_minutes_check_constraint_exists() -> None:
         c.name for c in Source.__table__.constraints if isinstance(c, CheckConstraint)
     }
     assert "ck_sources_refresh_interval_minutes_positive" in check_names
+
+
+def test_freshness_threshold_runs_check_constraint_exists() -> None:
+    """STORY-028: NULL (use the global default) or a positive integer."""
+    check_names = {
+        c.name for c in Source.__table__.constraints if isinstance(c, CheckConstraint)
+    }
+    assert "ck_sources_freshness_threshold_runs_positive" in check_names

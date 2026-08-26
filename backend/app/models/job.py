@@ -234,6 +234,13 @@ class Job(Base):
     source_updated_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # STORY-028: our own inferred-from-absence closure timestamp -- distinct
+    # from `closing_date` above, which is the source's own stated closing
+    # date (a fact from the source, not an inference). NULL = active. Reset
+    # to NULL by upsert_job() if a "closed" job reappears in a later run.
+    closed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # --- Provenance/dedup support (schema hooks only; no logic implemented here) ---
     raw_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

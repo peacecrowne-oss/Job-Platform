@@ -81,6 +81,10 @@ class Source(Base):
             "refresh_interval_minutes IS NULL OR refresh_interval_minutes > 0",
             name="ck_sources_refresh_interval_minutes_positive",
         ),
+        CheckConstraint(
+            "freshness_threshold_runs IS NULL OR freshness_threshold_runs > 0",
+            name="ck_sources_freshness_threshold_runs_positive",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -108,6 +112,11 @@ class Source(Base):
 
     # STORY-021: NULL means "use Settings.default_refresh_interval_minutes".
     refresh_interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # STORY-028: NULL means "use Settings.default_freshness_threshold_runs".
+    # A job not seen in this many consecutive *successful* runs of this
+    # source is auto-closed (see app/ingestion/freshness.py).
+    freshness_threshold_runs: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     last_run_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 

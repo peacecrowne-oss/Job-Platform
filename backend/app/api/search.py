@@ -153,6 +153,7 @@ def get_job_search(
     location_country: list[_LocationPart] | None = Query(default=None, max_length=20),
     location_region: list[_LocationPart] | None = Query(default=None, max_length=20),
     location_city: list[_LocationPart] | None = Query(default=None, max_length=20),
+    include_closed: bool = Query(default=False),
     session: Session = Depends(get_db),
 ) -> JobSearchResponse:
     # Over-fetch by one to answer has_next from this single query, instead
@@ -170,6 +171,7 @@ def get_job_search(
         location_country=location_country,
         location_region=location_region,
         location_city=location_city,
+        include_closed=include_closed,
     )
     has_next = len(jobs) > limit
     page = jobs[:limit]
