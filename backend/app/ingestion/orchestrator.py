@@ -79,6 +79,7 @@ from app.ingestion.freshness import close_stale_jobs
 from app.ingestion.locking import source_refresh_lock
 from app.ingestion.retry import RetryPolicy, with_retry
 from app.logging_config import correlation_id_var
+from app.metrics import ingestion_runs_total, scheduler_due_sources
 from app.models.ingestion_run import IngestionRun
 from app.models.source import Source
 from app.validation.data_quality import validate_batch
@@ -192,6 +193,10 @@ def run_source(session: Session, source: Source) -> IngestionRun:
         )
 
     finally:
+        # STORY-051: by the time finally runs, run.status is already set on
+        # both the success and failure paths above -- one increment covers
+        # both outcomes without duplicating the call in two places.
+        ingestion_runs_total.labels(source=source.connector_type, status=run.status).inc()
         correlation_id_var.reset(correlation_token)
 
     return run
@@ -225,6 +230,11 @@ def run_all_due_sources(session: Session) -> list[IngestionRun]:
     engine = session.get_bind()
     sources = session.execute(select(Source).where(Source.enabled.is_(True))).scalars().all()
     due_source_ids = [source.id for source in sources if _is_due(session, source)]
+
+    # STORY-051: "queue depth" mapped by analogy -- this architecture has
+    # no literal queue (STORY-021 rejected a broker-backed one) -- to how
+    # many sources are due but not yet processed at the start of this cycle.
+    scheduler_due_sources.set(len(due_source_ids))
 
     if not due_source_ids:
         return []

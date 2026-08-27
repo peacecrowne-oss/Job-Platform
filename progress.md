@@ -2281,9 +2281,9 @@ STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
 STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-024, STORY-025,
 STORY-027, STORY-028, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033,
-STORY-035, STORY-043, STORY-045, STORY-046, STORY-050, STORY-052, STORY-053,
-STORY-054, and STORY-057 are complete — **41 Stories, all at 100%**; no
-Story is currently in flight.
+STORY-035, STORY-043, STORY-045, STORY-046, STORY-050, STORY-051, STORY-052,
+STORY-053, STORY-054, and STORY-057 are complete — **42 Stories, all at
+100%**; no Story is currently in flight.
 
 ## Prioritized Backlog
 
@@ -4037,11 +4037,87 @@ TypeScript") and it passed with 0 errors on every build run above.
   stack; `alembic check` clean (no schema change this Story); `pip-audit`
   clean. No new dependency (stdlib `logging`/`json`/`contextvars` only).
   No live external ATS calls made or approved.
+- **STORY-051 — Metrics & Observability** — **complete, 100%**.
+  **Architecture decision, evaluated not defaulted**: added
+  `prometheus_client==0.26.0` — the one deliberate exception to this
+  project's usual "no new dependency" discipline (rejected for Celery/
+  APScheduler in STORY-021, for lint tooling in STORY-053). Justified
+  differently than those rejections: the FR's own literal text names the
+  Prometheus format directly, `prometheus_client` has zero transitive
+  dependencies of its own, and hand-rolling the text-exposition format
+  correctly (thread-safe counters, cumulative histogram buckets, correct
+  `HELP`/`TYPE` headers) is genuinely fiddly — unlike Celery/APScheduler,
+  which would have added multi-process *infrastructure* for a problem
+  already solved. New `app/metrics.py` centralizes every metric
+  definition in one module (the Story's own "naming convention
+  documented" technical note), following Prometheus's own official
+  naming guide: `http_requests_total` (Counter), `http_request_duration_
+  seconds` (Histogram), `ingestion_runs_total` (Counter, labeled by
+  `source`/`status`), `scheduler_due_sources` (Gauge). **"Queue depth"
+  mapped by analogy, flagged not silently invented**: this architecture
+  has no literal queue (STORY-021 deliberately rejected a broker) —
+  `scheduler_due_sources` stands in for it as "how many sources were due
+  but not yet processed at the start of one scheduler cycle." **Real
+  architectural wrinkle worked through, not glossed over**: the backend
+  API and the `scheduler` process (STORY-021) are separate OS processes;
+  `prometheus_client`'s registry is per-process and in-memory, so
+  ingestion metrics recorded inside `run_source()` when it runs *in the
+  scheduler* are invisible to the backend's own `/metrics` — this is the
+  standard, expected multi-process Prometheus pattern (a scraper polls
+  multiple independent targets), not a gap, solved with
+  `prometheus_client`'s own `start_http_server()` helper: the scheduler
+  now runs its own tiny metrics server on a new `scheduler_metrics_port`
+  setting (default `9101`, published in `docker-compose.yml` for local
+  `curl` access, a flagged judgment call). New, separate
+  `MetricsMiddleware` (deliberately distinct from STORY-050's
+  `CorrelationIdMiddleware` — single responsibility each, even though both
+  independently time the request) records HTTP metrics; `GET /metrics`
+  (`app/api/metrics.py`) is **not** rate-limited, exempted the same way
+  `/health` is (a scraper polls continuously) — a deliberate difference
+  from `/sources/health` (STORY-024), which stayed rate-limited as an
+  occasional human-consulted view, not a continuous scrape target. A
+  scrape of `/metrics` itself is not excluded from its own request
+  counts — a known, accepted, flagged characteristic, verified by a test
+  that asserts this exact behavior rather than hiding it. **Real bug
+  caught by the live validation sequence itself, not a code defect**: an
+  initial attempt to validate `ingestion_runs_total` via `docker compose
+  exec backend python scripts/run_ingestion.py` showed no data at all on
+  the backend's own `/metrics` — reasoned through rather than assumed
+  broken: `docker compose exec` spawns a brand-new, separate OS process
+  inside the container, distinct from the actual long-running `uvicorn`
+  process serving `/metrics` — that CLI process's own in-memory counters
+  vanished the instant it exited, exactly the already-flagged, accepted
+  CLI limitation from the approved plan, not a new problem. Re-validated
+  correctly against the actual long-running `scheduler` process instead
+  (a genuinely fresh, never-run source; `docker compose restart
+  scheduler`; checked `:9101/metrics`), which showed
+  `ingestion_runs_total{source="greenhouse",status="failed"} 1.0` and
+  `scheduler_due_sources 1.0` exactly as designed. **A second, smaller
+  real test bug found and fixed**: `test_ingestion_runs_total_increments_
+  on_success` originally used an unregistered fake `connector_type`
+  string, which correctly produces a `failed` run (`UnknownConnectorTypeError`),
+  not `success` — caught by the test's own assertion failing against real
+  Postgres, fixed by using the already-registered fake connector type
+  instead. Files created: `backend/app/metrics.py`,
+  `backend/app/api/metrics.py`, `backend/tests/test_metrics.py` (4 tests).
+  Files modified: `backend/requirements.txt` (+`prometheus_client`),
+  `backend/app/main.py` (+middleware, +router), `backend/app/config.py`
+  (+1 setting), `backend/app/ingestion/orchestrator.py` (+counter
+  increment, +gauge update), `backend/app/ingestion/scheduler.py`
+  (+`start_http_server()`), `backend/tests/test_orchestrator.py` (+3
+  tests), `docker-compose.yml` (+scheduler port), `.env.example` (+1
+  var), `README.md`, `progress.md`. Test suite: 484/484 passing (477
+  pre-existing + 7 new), live-verified against the real Docker stack —
+  both the backend's and the scheduler's own separate `/metrics`
+  endpoints, real traffic, and a real ingestion run on the actual
+  long-running scheduler process; `alembic check` clean (no schema change
+  this Story); `pip-audit` clean. No live external ATS calls made or
+  approved.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/050/052/053/054/057
-are done — **41 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/050/051/052/053/054/057
+are done — **42 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
 - **STORY-056 — Deployment**: `Dependencies: STORY-004 ✅, STORY-053 ✅` —
@@ -4060,9 +4136,6 @@ are done — **41 Stories, all at 100%**. Per the Implementation Sequence
   STORY-054 — unaffected directly; still Blocked on STORY-036.
 - **STORY-036 — Authentication**: unaffected directly (depends on
   STORY-007 ✅, STORY-012 ✅, not STORY-054) — already Ready.
-- **STORY-051 — Metrics & Observability**: `Dependencies: STORY-012 ✅,
-  STORY-050 ✅` — both now cleared. **STORY-051 is now Ready** (not
-  implemented).
 - **STORY-026 — Advanced/Cross-Source Deduplication** (P3) remains Ready
   (STORY-025 ✅, STORY-018 ✅, STORY-019 ✅) but is explicitly the lowest
   priority among currently-Ready Stories.
@@ -4070,6 +4143,6 @@ are done — **41 Stories, all at 100%**. Per the Implementation Sequence
   P2 — a baseline exists from STORY-035, but its own AC is not separately
   verified), **STORY-055** (Backups, P2).
 
-**Not yet approved for implementation** — nothing beyond STORY-050 has been
+**Not yet approved for implementation** — nothing beyond STORY-051 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.

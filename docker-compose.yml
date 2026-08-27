@@ -79,15 +79,22 @@ services:
   scheduler:
     # STORY-021: reuses the backend image/context (no duplicated
     # application source, no second Dockerfile) with a different command --
-    # a long-running loop instead of the HTTP server. No ports: it's not a
-    # request/response service. `restart: unless-stopped` is new to this
-    # file -- justified specifically because this is a background loop
-    # process, unlike the request/response services above, which Docker's
-    # own healthcheck+depends_on already manage access to.
+    # a long-running loop instead of the HTTP server. `restart:
+    # unless-stopped` is new to this file -- justified specifically
+    # because this is a background loop process, unlike the request/
+    # response services above, which Docker's own healthcheck+depends_on
+    # already manage access to.
+    # STORY-051: published (unlike Postgres/Redis) so a human can `curl`
+    # the scheduler's own /metrics directly during local dev -- it's not
+    # the backend's own /metrics (a separate OS process, separate
+    # prometheus_client registry); a judgment call, easy to unpublish if
+    # you'd prefer network-only access like Postgres/Redis.
     build:
       context: ./backend
     command: ["python", "-m", "app.ingestion.scheduler"]
     env_file: .env
+    ports:
+      - "${SCHEDULER_METRICS_PORT}:9101"
     depends_on:
       postgres:
         condition: service_healthy

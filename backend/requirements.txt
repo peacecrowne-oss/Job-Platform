@@ -12,3 +12,10 @@ sqlalchemy==2.0.36
 psycopg2-binary==2.9.10
 redis==5.2.1
 alembic==1.14.0
+# STORY-051: the official Prometheus client -- zero transitive dependencies
+# of its own. Hand-rolling the text-exposition format correctly (thread-
+# safe counters, cumulative histogram buckets, proper HELP/TYPE headers)
+# is genuinely fiddly; this is the one deliberate exception to this
+# project's usual "no new dependency" discipline, justified because the
+# Story's own literal FR names this exact format.
+prometheus_client==0.26.0

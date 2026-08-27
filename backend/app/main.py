@@ -21,15 +21,22 @@ sites. `CorrelationIdMiddleware` is added *after* CORS deliberately --
 Starlette applies middleware in reverse-registration order, so this makes
 the correlation ID available for the entire remaining request lifecycle,
 including CORS's own processing.
+
+Metrics (STORY-051): `MetricsMiddleware` is a separate, single-purpose
+middleware from `CorrelationIdMiddleware` -- distinct concerns (request
+counting/timing vs. correlation/logging), even though both independently
+time the request. `GET /metrics` is not rate-limited, exempted the same
+way `/health` is -- a scraper polls continuously.
 """
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, search, sources
+from app.api import health, metrics, search, sources
 from app.config import get_settings
 from app.errors import register_exception_handlers
 from app.logging_config import CorrelationIdMiddleware, configure_logging
+from app.metrics import MetricsMiddleware
 
 
 def create_app() -> FastAPI:
@@ -48,12 +55,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(CorrelationIdMiddleware)
+    app.add_middleware(MetricsMiddleware)
 
     register_exception_handlers(app)
 
     app.include_router(health.router)
     app.include_router(search.router)
     app.include_router(sources.router)
+    app.include_router(metrics.router)
 
     return app
 

@@ -24,6 +24,8 @@ from __future__ import annotations
 import logging
 import time
 
+from prometheus_client import start_http_server
+
 from app.config import get_settings
 from app.db import get_session_factory
 from app.ingestion.orchestrator import run_all_due_sources
@@ -66,4 +68,8 @@ def run_forever() -> None:
 
 if __name__ == "__main__":
     configure_logging(get_settings().log_level)  # STORY-050: JSON output, same as the API
+    # STORY-051: the scheduler is a separate process from the backend API
+    # (prometheus_client's registry is per-process, in-memory) -- this is
+    # its own, separate /metrics, not visible via the backend's endpoint.
+    start_http_server(get_settings().scheduler_metrics_port)
     run_forever()

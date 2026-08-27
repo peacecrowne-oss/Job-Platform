@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     # is NULL. A job not seen in this many consecutive successful runs of
     # its source is auto-closed. Not a secret.
     default_freshness_threshold_runs: int = 3
+    # STORY-051: the scheduler process has no HTTP server of its own
+    # otherwise -- this is where its /metrics becomes scrapeable
+    # (prometheus_client.start_http_server()). Not a secret.
+    scheduler_metrics_port: int = 9101
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -328,3 +328,56 @@ def test_job_missing_from_enough_successful_runs_is_closed_end_to_end(db_session
     disappears = db_session_committing.query(Job).filter(Job.source_job_id == "disappears").one()
     assert stays.closed_at is None
     assert disappears.closed_at is not None
+
+
+# --- STORY-051: metrics, real Postgres via the orchestrator ---
+# Counters are process-global and cumulative -- assertions check relative
+# increases (delta before/after), never absolute values.
+
+
+def test_ingestion_runs_total_increments_on_success(db_session_committing) -> None:
+    from app.metrics import ingestion_runs_total
+
+    # connector_type must be an actually-registered type -- an unregistered
+    # one (this test's own original mistake, caught via live Docker
+    # validation) correctly produces a "failed" run, not "success".
+    source = _make_source(
+        db_session_committing, connector_type="orchestrator_test_fake", config={"records": []}
+    )
+    before = ingestion_runs_total.labels(
+        source="orchestrator_test_fake", status="success"
+    )._value.get()
+
+    run_source(db_session_committing, source)
+
+    after = ingestion_runs_total.labels(
+        source="orchestrator_test_fake", status="success"
+    )._value.get()
+    assert after == before + 1
+
+
+def test_ingestion_runs_total_increments_on_failure(db_session_committing) -> None:
+    from app.metrics import ingestion_runs_total
+
+    source = _make_source(db_session_committing, connector_type="does-not-exist-metrics-test")
+    before = ingestion_runs_total.labels(
+        source="does-not-exist-metrics-test", status="failed"
+    )._value.get()
+
+    run_source(db_session_committing, source)
+
+    after = ingestion_runs_total.labels(
+        source="does-not-exist-metrics-test", status="failed"
+    )._value.get()
+    assert after == before + 1
+
+
+def test_scheduler_due_sources_gauge_reflects_due_count(db_session_committing) -> None:
+    from app.metrics import scheduler_due_sources
+
+    _make_source(db_session_committing, config={"records": []})
+    _make_source(db_session_committing, config={"records": []})
+
+    run_all_due_sources(db_session_committing)
+
+    assert scheduler_due_sources._value.get() == 2

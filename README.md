@@ -96,10 +96,20 @@
 > `logger.exception()` call site anywhere in the codebase; live-verified
 > that two log lines from two different, untouched modules during one
 > real ingestion run carry the identical correlation ID, matching that
-> run's own database id exactly) exist so far. The `jobs` table itself is
-> empty again after each Story's own validation inserts (since removed) —
-> nothing has been left running against real external sources by default.
-> See
+> run's own database id exactly), and metrics (STORY-051 — `GET /metrics`
+> on the backend, a separate `/metrics` on the scheduler process's own
+> port (a distinct OS process/`prometheus_client` registry — the same
+> multi-process reality STORY-050 already established), covering request
+> latency/rate, ingestion run outcomes by source and status, and a
+> due-sources gauge standing in for "queue depth" in an architecture that
+> deliberately has no literal queue; the one new dependency in this
+> project's history, justified because the Story's own literal FR names
+> the Prometheus format directly; live-verified against real traffic and
+> a real ingestion run on the actual long-running scheduler process, not
+> just a short-lived CLI invocation) exist so far. The `jobs` table itself
+> is empty again after each Story's own validation inserts (since
+> removed) — nothing has been left running against real external sources
+> by default. See
 > [`progress.md`](progress.md) for the exact current state and
 > [`requirement.md`](requirement.md) for the full requirements and Story
 > backlog.
@@ -311,9 +321,14 @@ backend/app/logging_config.py  JsonFormatter, CorrelationIdFilter,
                                 CorrelationIdMiddleware -- structured logs +
                                 correlation IDs for every app.* logger,
                                 zero changes to existing call sites (STORY-050)
+backend/app/metrics.py  http_requests_total/http_request_duration_seconds/
+                         ingestion_runs_total/scheduler_due_sources,
+                         MetricsMiddleware (STORY-051)
+backend/app/api/metrics.py  GET /metrics -- not rate-limited, exempted the
+                             same way /health is (STORY-051)
 backend/tests/          Backend test suite (pytest; no live infra required)
 backend/requirements.txt      Pinned runtime dependencies (incl. SQLAlchemy,
-                               psycopg2-binary, redis)
+                               psycopg2-binary, redis, prometheus_client)
 backend/requirements-dev.txt  Runtime + test dependencies (pytest, httpx)
 backend/pytest.ini      pytest configuration (adds backend/ to the import path)
 backend/Dockerfile      Multi-stage build image (STORY-004; also copies
@@ -408,8 +423,11 @@ from the same root `.env` used for local (non-Docker) development. `backend`/
 healthchecks, not a fixed sleep) before starting; each request/response service
 has its own healthcheck. `scheduler` (STORY-021) reuses the `backend` image with
 a different command — a background polling loop, not an HTTP server — so it has
-no healthcheck of its own and no published port; `restart: unless-stopped` keeps
-it running across a crash. Verify everything came up:
+no healthcheck of its own; `restart: unless-stopped` keeps it running across a
+crash. It does have one published port now (STORY-051, `SCHEDULER_METRICS_PORT`,
+default `9101`) — its own `/metrics`, a separate OS process and
+`prometheus_client` registry from the backend's own `/metrics` on `BACKEND_PORT`.
+Verify everything came up:
 
 ```bash
 docker compose ps
