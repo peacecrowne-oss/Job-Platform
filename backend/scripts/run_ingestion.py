@@ -20,12 +20,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.config import get_settings  # noqa: E402
 from app.db import get_session_factory  # noqa: E402
 from app.ingestion.orchestrator import run_all_due_sources, run_source  # noqa: E402
+from app.logging_config import configure_logging  # noqa: E402
 from app.models.source import Source  # noqa: E402
 
 
 def main() -> None:
+    configure_logging(get_settings().log_level)  # STORY-050: JSON output, same as the API/scheduler
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source-id",

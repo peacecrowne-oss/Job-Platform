@@ -2281,9 +2281,9 @@ STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
 STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-024, STORY-025,
 STORY-027, STORY-028, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033,
-STORY-035, STORY-043, STORY-045, STORY-046, STORY-052, STORY-053, STORY-054,
-and STORY-057 are complete — **40 Stories, all at 100%**; no Story is
-currently in flight.
+STORY-035, STORY-043, STORY-045, STORY-046, STORY-050, STORY-052, STORY-053,
+STORY-054, and STORY-057 are complete — **41 Stories, all at 100%**; no
+Story is currently in flight.
 
 ## Prioritized Backlog
 
@@ -3961,11 +3961,87 @@ TypeScript") and it passed with 0 errors on every build run above.
   Test suite: 465/465 passing (455 pre-existing + 10 new), live-verified
   against the real Docker stack; full `alembic check` round-trip clean;
   `pip-audit` clean. No live external ATS calls made or approved.
+- **STORY-050 — Structured Logging** — **complete, 100%**. Direct
+  inspection before writing any code found that, despite every module
+  already using `logging.getLogger(__name__)` consistently, almost no
+  actual logging configuration existed anywhere — `scheduler.py`'s own
+  `if __name__ == "__main__":` block was the *only* place
+  `logging.basicConfig()` was ever called (plain text), and the FastAPI
+  app itself never configured logging at all, silently relying on
+  uvicorn's own default output. New `app/logging_config.py`
+  (`JsonFormatter`, `CorrelationIdFilter`, `CorrelationIdMiddleware`,
+  `configure_logging()`) attaches one JSON-formatting handler to the
+  shared `"app"` parent logger every `app.*`-named logger in this
+  codebase already lives under — **zero changes to any existing
+  `logger.warning()`/`logger.exception()` call site anywhere** (`retry.py`,
+  `dedup.py`, `http_client.py`, `locking.py`, etc. all gained structured
+  output and automatic correlation-ID injection for free). Correlation ID
+  is a `contextvars.ContextVar`, not a threaded parameter:
+  `CorrelationIdMiddleware` binds one per HTTP request (reusing a
+  client-supplied `X-Correlation-ID` header when present, else generating
+  one, always echoing it back on the response); `run_source()`
+  (STORY-021) binds it to **the `IngestionRun.id` it already creates** —
+  a deliberate, elegant reuse requiring no new ID generation, directly
+  giving every ingestion-run log line a correlation value that's also a
+  real, queryable database key. **Scope boundary, flagged not silently
+  decided**: uvicorn's own built-in access/error log lines are left in
+  their default (non-JSON) format — reformatting them would require
+  replacing the Dockerfile's bare `uvicorn` CLI invocation with a Python
+  entrypoint script calling `uvicorn.run(..., log_config=...)`, a real,
+  separate architectural change the literal text ("this application's own
+  logs across backend API and worker processes") doesn't clearly demand;
+  this application's own log output — which is what actually carries the
+  correlation IDs the AC requires — is fully JSON either way, confirmed
+  live (both coexist in the same container's stdout). Edge case
+  ("logging failures must not crash the request/task being logged")
+  satisfied twice over: Python's own `logging.Handler.emit()` already
+  routes a formatting exception to `handleError()` rather than
+  propagating it, and `JsonFormatter` additionally wraps its own
+  `json.dumps()` in a `try/except` with a safe fallback, verified with a
+  test that logs a genuinely non-serializable object and confirms no
+  exception escapes. **Real bug found and fixed during live Docker
+  validation, not caught by any test beforehand**: `app/ingestion/
+  scheduler.py`'s own top-level `logger = logging.getLogger(__name__)`
+  silently broke the moment `logging.basicConfig()` was replaced with
+  `configure_logging()` — when this module is run as the entry point via
+  `python -m app.ingestion.scheduler`, Python sets `__name__` to
+  `"__main__"`, not `"app.ingestion.scheduler"`, putting this one logger
+  outside the `"app"` tree entirely; with no handler on `"__main__"` or
+  root, its own INFO-level "Scheduler started" line was silently dropped
+  (Python's last-resort handler only surfaces WARNING+). Caught by
+  noticing `docker compose logs scheduler` was completely empty after
+  restart — genuinely zero output, not an error — then reasoned through
+  to the exact mechanism rather than guessed at a fix. Fixed by hardcoding
+  the logger name (`logging.getLogger("app.ingestion.scheduler")`) instead
+  of relying on `__name__`; a regression test now asserts this exact
+  logger's `.name` attribute directly, independent of how the module
+  happens to be invoked. **Live Docker validation, real proof of the
+  literal AC**: a real HTTP request showed a matching `X-Correlation-ID`
+  response header and JSON log line; a client-supplied correlation ID was
+  reused verbatim end-to-end; a real ingestion run (safe placeholder host,
+  no live ATS call) produced two log lines from two different, entirely
+  untouched modules (`app.connectors.http_client` and `app.ingestion.
+  orchestrator`) sharing the identical correlation ID, which exactly
+  matched that run's own printed `IngestionRun.id` — direct, literal proof
+  of "a single request/task can be traced end-to-end via its correlation
+  ID across log lines." Validation data removed afterward (0 rows
+  confirmed). Files created: `backend/app/logging_config.py`,
+  `backend/tests/test_logging_config.py` (12 tests). Files modified:
+  `backend/app/main.py` (+middleware, +`configure_logging()` call),
+  `backend/app/ingestion/orchestrator.py` (+correlation binding in
+  `run_source()`), `backend/app/ingestion/scheduler.py` (switched to
+  `configure_logging()`, fixed the `__name__`/`"__main__"` logger-naming
+  bug), `backend/scripts/run_ingestion.py` (same, for manual-run
+  consistency), `README.md`, `progress.md`. Test suite: 477/477 passing
+  (465 pre-existing + 12 new), live-verified against the real Docker
+  stack; `alembic check` clean (no schema change this Story); `pip-audit`
+  clean. No new dependency (stdlib `logging`/`json`/`contextvars` only).
+  No live external ATS calls made or approved.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/052/053/054/057
-are done — **40 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/050/052/053/054/057
+are done — **41 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
 - **STORY-056 — Deployment**: `Dependencies: STORY-004 ✅, STORY-053 ✅` —
@@ -3984,14 +4060,16 @@ are done — **40 Stories, all at 100%**. Per the Implementation Sequence
   STORY-054 — unaffected directly; still Blocked on STORY-036.
 - **STORY-036 — Authentication**: unaffected directly (depends on
   STORY-007 ✅, STORY-012 ✅, not STORY-054) — already Ready.
+- **STORY-051 — Metrics & Observability**: `Dependencies: STORY-012 ✅,
+  STORY-050 ✅` — both now cleared. **STORY-051 is now Ready** (not
+  implemented).
 - **STORY-026 — Advanced/Cross-Source Deduplication** (P3) remains Ready
   (STORY-025 ✅, STORY-018 ✅, STORY-019 ✅) but is explicitly the lowest
   priority among currently-Ready Stories.
 - Other genuinely-Ready Stories, all P1/P2: **STORY-049** (Responsive UI,
   P2 — a baseline exists from STORY-035, but its own AC is not separately
-  verified), **STORY-050** (Structured Logging, P2), **STORY-055**
-  (Backups, P2).
+  verified), **STORY-055** (Backups, P2).
 
-**Not yet approved for implementation** — nothing beyond STORY-028 has been
+**Not yet approved for implementation** — nothing beyond STORY-050 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.

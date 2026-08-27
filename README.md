@@ -87,7 +87,16 @@
 > threshold — the literal "don't mass-close on an outage" edge case; a
 > closed job reappearing in a later run is reopened automatically;
 > live-verified end-to-end against the real Docker stack, including
-> through the real search API) exist so far. The `jobs` table itself is
+> through the real search API), and structured logging (STORY-050 — every
+> `app.*` logger's output is JSON, with a correlation ID injected
+> automatically into every log line — a per-request ID (echoed back as an
+> `X-Correlation-ID` response header, reusing a client-supplied one if
+> present) for the API, the `IngestionRun`'s own id for a scheduled
+> refresh — with zero changes to any existing `logger.warning()`/
+> `logger.exception()` call site anywhere in the codebase; live-verified
+> that two log lines from two different, untouched modules during one
+> real ingestion run carry the identical correlation ID, matching that
+> run's own database id exactly) exist so far. The `jobs` table itself is
 > empty again after each Story's own validation inserts (since removed) —
 > nothing has been left running against real external sources by default.
 > See
@@ -298,6 +307,10 @@ backend/app/api/sources.py  GET /sources/health (STORY-024)
 backend/app/ingestion/freshness.py  close_stale_jobs() -- auto-closure derived
                                      from IngestionRun/Job timestamps, no new
                                      join table (STORY-028)
+backend/app/logging_config.py  JsonFormatter, CorrelationIdFilter,
+                                CorrelationIdMiddleware -- structured logs +
+                                correlation IDs for every app.* logger,
+                                zero changes to existing call sites (STORY-050)
 backend/tests/          Backend test suite (pytest; no live infra required)
 backend/requirements.txt      Pinned runtime dependencies (incl. SQLAlchemy,
                                psycopg2-binary, redis)

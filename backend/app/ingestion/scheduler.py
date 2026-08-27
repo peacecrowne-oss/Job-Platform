@@ -27,8 +27,17 @@ import time
 from app.config import get_settings
 from app.db import get_session_factory
 from app.ingestion.orchestrator import run_all_due_sources
+from app.logging_config import configure_logging
 
-logger = logging.getLogger(__name__)
+# STORY-050: NOT logging.getLogger(__name__) -- when this module is run as
+# the entry point (`python -m app.ingestion.scheduler`), __name__ becomes
+# "__main__", not "app.ingestion.scheduler", which would put this logger
+# outside the "app" logger tree entirely (a real bug caught during live
+# Docker validation: the "Scheduler started" line was silently dropped --
+# "__main__" has no handler of its own and only WARNING+ reaches Python's
+# last-resort handler). A hardcoded name keeps this logger under "app"
+# regardless of how the module is invoked.
+logger = logging.getLogger("app.ingestion.scheduler")
 
 
 def run_forever() -> None:
@@ -56,5 +65,5 @@ def run_forever() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=get_settings().log_level.upper())
+    configure_logging(get_settings().log_level)  # STORY-050: JSON output, same as the API
     run_forever()

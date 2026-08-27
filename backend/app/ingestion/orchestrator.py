@@ -78,6 +78,7 @@ from app.ingestion.dedup import UpsertOutcome, upsert_batch
 from app.ingestion.freshness import close_stale_jobs
 from app.ingestion.locking import source_refresh_lock
 from app.ingestion.retry import RetryPolicy, with_retry
+from app.logging_config import correlation_id_var
 from app.models.ingestion_run import IngestionRun
 from app.models.source import Source
 from app.validation.data_quality import validate_batch
@@ -118,6 +119,12 @@ def run_source(session: Session, source: Source) -> IngestionRun:
     run = IngestionRun(source_id=source.id, status="running")
     session.add(run)
     session.commit()
+
+    # STORY-050: reuses the IngestionRun's own id as the correlation ID for
+    # every log line emitted during this source's run -- no new ID needed.
+    # Each STORY-023 worker thread calls run_source() independently, so
+    # each thread binds its own value; no cross-thread propagation needed.
+    correlation_token = correlation_id_var.set(str(run.id))
 
     try:
         require_source_authorized(source)
@@ -183,6 +190,9 @@ def run_source(session: Session, source: Source) -> IngestionRun:
         logger.warning(
             "Ingestion run failed for source %s (%s): %s", source.id, source.connector_type, exc
         )
+
+    finally:
+        correlation_id_var.reset(correlation_token)
 
     return run
 
