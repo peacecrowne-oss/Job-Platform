@@ -2281,9 +2281,9 @@ STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
 STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-024, STORY-025,
 STORY-027, STORY-028, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033,
-STORY-035, STORY-043, STORY-045, STORY-046, STORY-050, STORY-051, STORY-052,
-STORY-053, STORY-054, STORY-055, and STORY-057 are complete — **43 Stories,
-all at 100%**; no Story is currently in flight.
+STORY-035, STORY-043, STORY-045, STORY-046, STORY-049, STORY-050, STORY-051,
+STORY-052, STORY-053, STORY-054, STORY-055, and STORY-057 are complete — **44
+Stories, all at 100%**; no Story is currently in flight.
 
 ## Prioritized Backlog
 
@@ -4172,11 +4172,70 @@ TypeScript") and it passed with 0 errors on every build run above.
   the test dump was deleted and the empty `backups/` directory removed
   before finishing, so the working tree carries no backup artifact. No
   live external ATS calls made or approved.
+- **STORY-049 — Responsive UI** — **complete, 100%**.
+  Phase 1 inspection first ruled out one hypothesized gap rather than
+  assuming it: `curl`ing the actually-running frontend container showed
+  Next.js 16's App Router already auto-injects a correct
+  `<meta name="viewport">` with no explicit `viewport` export needed, so
+  that was left untouched. The real gap found was in the ≥768px filters
+  grid (`section[aria-label="Filters"] { display: grid; grid-template-
+  columns: repeat(2, 1fr); }`, from STORY-035): the standalone Seniority
+  and Company `<label>`+`<input>` pairs were separate direct grid
+  children, only visually landing in correct side-by-side pairs by
+  coincidence of the field count being even. Fixed by wrapping each in a
+  `<div className="filter-field">` (`frontend/app/page.tsx`). **A second,
+  real bug found only by live visual/DOM verification, not by reasoning
+  alone**: fixing the pairing left "Clear all filters" auto-placed next
+  to the Location fieldset in the same grid row, and grid's default
+  `align-items: stretch` stretched the button to Location's full height
+  (verified precisely via a throwaway Playwright DOM-geometry script
+  against the real running container, not just eyeballing a screenshot:
+  button height 385px, matching the fieldset). Fixed with one targeted
+  rule — `.filters-clear { grid-column: 1 / -1; }` — giving the button
+  its own full-width row instead of restructuring the grid. Re-verified
+  after the fix: button height 44px, its own row, Seniority/Company
+  correctly paired. Other changes: `.search-form { display: flex;
+  flex-wrap: wrap; gap: var(--space-2); }` for deliberate Search/Clear-
+  search button wrapping (previously relied on default inline wrapping);
+  `fieldset label { min-height: 44px; }` so checkbox rows meet the same
+  touch-target baseline already established for buttons. **Process
+  lesson surfaced and worked through, not glossed over**: the first full
+  round of screenshots/DOM inspection was taken against a *stale* Docker
+  image built before these edits (the `frontend` service is a built
+  image, not a live-reloading dev server) — silently validating pre-fix
+  code. Caught because the DOM inspection showed plain `<label>`/`<input>`
+  as separate grid children instead of the just-added `.filter-field`
+  wrapper divs; `docker compose build frontend && docker compose up -d
+  frontend` before every subsequent check going forward. No `viewport`
+  meta change, no new breakpoint, no filter-collapse/hamburger UI added
+  (stacking was judged sufficient for the AC as written), no backend
+  change. Files modified: `frontend/app/page.tsx`, `frontend/app/globals.css`.
+  Files created: `frontend/tests-e2e/responsive.spec.ts` (6 tests: no-
+  horizontal-overflow assertions at 320/375/768/1024/1440px via
+  `document.documentElement.scrollWidth <= clientWidth`, screenshot
+  capture at each width, plus a full search/filter/sort/pagination flow
+  re-run at 320px against the same seeded `e2e_fixture` jobs
+  `search.spec.ts` already uses). **Validation, all live**: Vitest 56/56
+  (via `--pool=forks` — the committed `vitest.config.ts`'s `pool:
+  "threads"` now hangs on this environment, an unrelated pre-existing
+  quirk not touched, likely from a Node version change since STORY-035/
+  054; flagged, not fixed, since it's outside this Story's scope);
+  `npm run build` (Turbopack, compiles + type-checks + prerenders
+  cleanly); existing `search.spec.ts` E2E flow re-run and still passing
+  (no desktop regression); new `responsive.spec.ts` 6/6 passing against
+  the real rebuilt Docker Compose stack; all 5 target-width screenshots
+  visually reviewed (via the Read tool's image support) confirming no
+  clipped controls and the grid-pairing fix. Seeded/cleaned up 25
+  `e2e_fixture` jobs via the existing `backend/scripts/
+  seed_e2e_fixtures.py`/`--cleanup` — confirmed 0 rows in `jobs`
+  afterward. No live external ATS calls made or approved. No Stories'
+  readiness changed (checked every `Dependencies` field in
+  `requirement.md` for `STORY-049` — none found).
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/050/051/052/053/054/055/057
-are done — **43 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/049/050/051/052/053/054/055/057
+are done — **44 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
 - **STORY-056 — Deployment**: `Dependencies: STORY-004 ✅, STORY-053 ✅` —
@@ -4198,10 +4257,7 @@ are done — **43 Stories, all at 100%**. Per the Implementation Sequence
 - **STORY-026 — Advanced/Cross-Source Deduplication** (P3) remains Ready
   (STORY-025 ✅, STORY-018 ✅, STORY-019 ✅) but is explicitly the lowest
   priority among currently-Ready Stories.
-- Other genuinely-Ready Stories, all P1/P2: **STORY-049** (Responsive UI,
-  P2 — a baseline exists from STORY-035, but its own AC is not separately
-  verified).
 
-**Not yet approved for implementation** — nothing beyond STORY-055 has been
+**Not yet approved for implementation** — nothing beyond STORY-049 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.

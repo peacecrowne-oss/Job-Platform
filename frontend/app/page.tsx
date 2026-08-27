@@ -213,23 +213,27 @@ function SearchPageInner() {
           ))}
         </fieldset>
 
-        <label htmlFor="seniority">Seniority</label>
-        <input
-          id="seniority"
-          type="text"
-          value={form.seniority}
-          onChange={(e) => handleTextFilterChange("seniority", e.target.value)}
-          onBlur={() => handleTextFilterCommit("seniority")}
-        />
+        <div className="filter-field">
+          <label htmlFor="seniority">Seniority</label>
+          <input
+            id="seniority"
+            type="text"
+            value={form.seniority}
+            onChange={(e) => handleTextFilterChange("seniority", e.target.value)}
+            onBlur={() => handleTextFilterCommit("seniority")}
+          />
+        </div>
 
-        <label htmlFor="company">Company</label>
-        <input
-          id="company"
-          type="text"
-          value={form.company}
-          onChange={(e) => handleTextFilterChange("company", e.target.value)}
-          onBlur={() => handleTextFilterCommit("company")}
-        />
+        <div className="filter-field">
+          <label htmlFor="company">Company</label>
+          <input
+            id="company"
+            type="text"
+            value={form.company}
+            onChange={(e) => handleTextFilterChange("company", e.target.value)}
+            onBlur={() => handleTextFilterCommit("company")}
+          />
+        </div>
 
         <fieldset>
           <legend>Location</legend>
@@ -259,7 +263,12 @@ function SearchPageInner() {
           />
         </fieldset>
 
-        <button type="button" onClick={handleClearFilters} disabled={isLoading}>
+        <button
+          type="button"
+          className="filters-clear"
+          onClick={handleClearFilters}
+          disabled={isLoading}
+        >
           Clear all filters
         </button>
       </section>
