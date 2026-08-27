@@ -342,7 +342,9 @@ backend/alembic/versions/  Baseline (no-op) + create-jobs-table +
 docker-compose.yml       Full local stack: backend, frontend, Postgres, Redis,
                           with healthchecks (STORY-005)
 docs/                   Project documentation
-scripts/                Developer/operational scripts (none yet)
+scripts/backup_db.sh    Local Postgres backup via pg_dump (STORY-055)
+scripts/restore_db.sh   Safe-by-default restore validation into a
+                         disposable scratch database (STORY-055)
 .github/workflows/      CI workflows (not yet implemented — see STORY-053)
 requirement.md          Source of truth for requirements (Stories)
 progress.md             Implementation ledger
@@ -514,6 +516,55 @@ the backend. Every schema change ships as its own migration; already-applied
 migrations are never edited after the fact. Every migration must implement a
 real, reversible `downgrade()`, or explicitly `raise NotImplementedError` with
 a stated reason if downgrading genuinely isn't safe.
+
+## Backups
+
+**Local, manual Postgres backup/restore is implemented** (STORY-055):
+`scripts/backup_db.sh` and `scripts/restore_db.sh`. This covers the local
+Docker Compose stack only — off-host storage, encryption-at-rest policy,
+retention/rotation, an automated schedule, and any managed-provider backup
+strategy are all explicitly deferred until a hosting target is chosen
+(STORY-056, not yet implemented); the Story's own Technical Notes call this
+out ("Backup target/retention decided at implementation time based on
+chosen hosting").
+
+Both scripts run `pg_dump`/`pg_restore`/`psql` *inside* the `postgres`
+container via `docker compose exec`, connecting over its local unix socket
+under the same trust auth the existing `pg_isready` healthcheck already
+relies on — neither script reads or passes `POSTGRES_PASSWORD`.
+
+To take a backup (stack must be running):
+
+```bash
+docker compose up -d
+scripts/backup_db.sh
+```
+
+This writes a timestamped, Postgres custom-format dump to `backups/`
+(git-ignored — see below) and fails (non-zero exit) if the dump is missing
+or empty. Override the output directory with `BACKUP_DIR=/some/other/path
+scripts/backup_db.sh` if needed.
+
+To validate that a backup is actually restorable, run:
+
+```bash
+scripts/restore_db.sh backups/<timestamp>.dump
+```
+
+This is **safe by default**: it creates a disposable scratch database
+(`job_platform_restore_scratch` unless a second argument overrides the
+name), restores the dump into *that* database only, prints the restored
+table count, then drops the scratch database again on exit — success or
+failure. It refuses to run at all if the scratch name matches the primary
+`job_platform` database or a Postgres-reserved name (`postgres`,
+`template0`, `template1`), and validates the dump file exists and is
+non-empty before doing anything. It never touches the primary application
+database.
+
+Dump files may contain the same data as the running database (including
+anything that looks like production data once this is deployed anywhere)
+— **never commit a `.dump` file**. `backups/` and `*.dump` are both
+git-ignored; verify with `git status`/`git check-ignore` if in doubt.
 
 ## Tests
 

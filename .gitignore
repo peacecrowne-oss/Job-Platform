@@ -72,6 +72,9 @@ ehthumbs.db
 *.dump
 pgdata/
 
+# --- Database backups (STORY-055) ---
+backups/
+
 # --- Build artifacts / runtime / secrets (misc) ---
 *.tsbuildinfo
 tmp/

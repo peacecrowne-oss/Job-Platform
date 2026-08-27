@@ -2282,8 +2282,8 @@ STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
 STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-024, STORY-025,
 STORY-027, STORY-028, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033,
 STORY-035, STORY-043, STORY-045, STORY-046, STORY-050, STORY-051, STORY-052,
-STORY-053, STORY-054, and STORY-057 are complete — **42 Stories, all at
-100%**; no Story is currently in flight.
+STORY-053, STORY-054, STORY-055, and STORY-057 are complete — **43 Stories,
+all at 100%**; no Story is currently in flight.
 
 ## Prioritized Backlog
 
@@ -4113,11 +4113,70 @@ TypeScript") and it passed with 0 errors on every build run above.
   long-running scheduler process; `alembic check` clean (no schema change
   this Story); `pip-audit` clean. No live external ATS calls made or
   approved.
+- **STORY-055 — Backups** — **complete, 100%**.
+  Local, manually-invoked Docker Compose backup/restore only — no cloud
+  storage, no cron/scheduling, no STORY-056 deployment behavior, no
+  retention policy invented ahead of an undecided hosting platform, per
+  the Story's own Technical Note and the approved plan's explicit
+  constraints. `scripts/backup_db.sh` runs `pg_dump --format=custom`
+  *inside* the `postgres` container via `docker compose exec`, writing a
+  UTC-timestamped dump to a local `backups/` directory (now also
+  explicitly listed in `.gitignore`, on top of the pre-existing `*.dump`
+  rule); fails fast (`set -euo pipefail`) and removes any partial/empty
+  dump file via an EXIT trap if `pg_dump` fails. `scripts/restore_db.sh`
+  is safe by default: it restores into a disposable scratch database
+  (`job_platform_restore_scratch` unless overridden) that the script
+  itself creates and drops via an EXIT trap — never the primary
+  `job_platform` database. Both scripts derive `POSTGRES_USER`/
+  `POSTGRES_DB` from the project's own `.env` (grepping just those two
+  lines, never sourcing the whole file) and never read
+  `POSTGRES_PASSWORD` at all — `pg_dump`/`psql`/`pg_restore` all run
+  inside the container over its local unix socket under the same trust
+  auth the existing `pg_isready` healthcheck (STORY-052) already relies
+  on, so no credential ever needs to be read, passed, or printed by
+  either script. **Safety guards, each live-tested against a real
+  rejection**: a regex identifier check (`^[A-Za-z_][A-Za-z0-9_]*$`) on
+  the scratch DB name rejects a SQL-injection-shaped argument (verified
+  live with `x"; DROP DATABASE job_platform; --`, correctly refused
+  before ever reaching `psql`); a second, independent check refuses the
+  scratch name if it matches the primary database (read from `.env`, not
+  hard-coded) or a Postgres-reserved name (`postgres`, `template0`,
+  `template1`) — both verified live. **Real bug found and fixed during
+  live validation**: the scripts originally used `psql -c 'DROP DATABASE
+  IF EXISTS :"scratch";'` for the create/drop steps — live-tested and
+  failed with a syntax error, because psql's `:"var"`/`:'var'` variable
+  substitution is only applied when reading a script (stdin/`-f`), not
+  for `-c` command strings (confirmed by isolating the behavior directly
+  against the real Postgres 16.4 container). Fixed by piping the same SQL
+  through stdin via a heredoc instead of `-c`, then re-verified live.
+  Files created: `scripts/backup_db.sh`, `scripts/restore_db.sh` (both
+  executable, `bash -n`-clean). Files modified: `.gitignore`
+  (+`backups/`), `README.md` (new "Backups" section + repository-structure
+  entries), `progress.md`. No pytest tests added (ops/shell-script Story,
+  not application code — consistent with the approved plan). Full backend
+  regression suite still run and passing: 484/484 (unchanged from
+  STORY-051, since no Python files were touched); `alembic check` clean;
+  `pip-audit` clean; `docker compose config --quiet` clean. **Live
+  validation against the real Docker Compose stack**: `backup_db.sh`
+  produced a 15,214-byte custom-format dump; `pg_restore --list` (run
+  inside the container) read it cleanly, listing all 5 tables
+  (`alembic_version`, `companies`, `ingestion_runs`, `jobs`, `sources`)
+  plus their constraints/indexes; `restore_db.sh` restored it into the
+  scratch database, confirmed via `information_schema.tables` that all 5
+  tables came back, then dropped the scratch database — confirmed gone
+  afterward via `pg_database`; the primary `job_platform` database's own
+  table list and all-zero row counts were captured before and after the
+  entire test sequence and are byte-for-byte identical, proving the
+  restore test never touched it. `git check-ignore -v` confirmed both the
+  generated `.dump` file and the `backups/` directory itself are ignored;
+  the test dump was deleted and the empty `backups/` directory removed
+  before finishing, so the working tree carries no backup artifact. No
+  live external ATS calls made or approved.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/050/051/052/053/054/057
-are done — **42 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/050/051/052/053/054/055/057
+are done — **43 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
 - **STORY-056 — Deployment**: `Dependencies: STORY-004 ✅, STORY-053 ✅` —
@@ -4141,8 +4200,8 @@ are done — **42 Stories, all at 100%**. Per the Implementation Sequence
   priority among currently-Ready Stories.
 - Other genuinely-Ready Stories, all P1/P2: **STORY-049** (Responsive UI,
   P2 — a baseline exists from STORY-035, but its own AC is not separately
-  verified), **STORY-055** (Backups, P2).
+  verified).
 
-**Not yet approved for implementation** — nothing beyond STORY-051 has been
+**Not yet approved for implementation** — nothing beyond STORY-055 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.
