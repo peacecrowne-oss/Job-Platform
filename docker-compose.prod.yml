@@ -1,0 +1,110 @@
+# STORY-056: standalone deployment descriptor for "a repeatable way to
+# deploy beyond local Docker Compose". Unlike docker-compose.yml (dev),
+# this file has no `build:` context anywhere -- a real target host only
+# ever needs this file, a `.env.prod` (same variable names as
+# .env.example; a name distinct from dev's own `.env` so both can coexist
+# unambiguously, e.g. when exercising this file locally alongside the dev
+# stack), and the two pre-built images (pulled from a registry, or
+# `docker load`ed), never a source checkout. Config is entirely
+# environment-variable driven; no hardcoded environment branching exists
+# anywhere in the application.
+#
+# BACKEND_IMAGE/FRONTEND_IMAGE let the operator point at whatever
+# registry/tag they actually pushed to; the local defaults below match
+# what `docker build -t ...` produces without any registry involved, for
+# the simplest possible exercise of this file.
+#
+# Known characteristic, not a defect: NEXT_PUBLIC_API_BASE_URL is a
+# Next.js client-side variable and can only be baked in at *build* time
+# (see frontend/Dockerfile) -- it is NOT read from .env.prod at deploy
+# time. Pointing the frontend at a different backend URL means rebuilding
+# the frontend image with that build arg, not just changing .env.prod
+# here. See README.md's "Deployment" section.
+services:
+  postgres:
+    image: postgres:16.4-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-bookworm
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    image: ${BACKEND_IMAGE:-job-platform-backend:latest}
+    env_file: .env.prod
+    ports:
+      - "${BACKEND_PORT}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys\ntry:\n  sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready').status == 200 else 1)\nexcept Exception:\n  sys.exit(1)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-job-platform-frontend:latest}
+    env_file: .env.prod
+    ports:
+      - "${FRONTEND_PORT}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:3000/', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  scheduler:
+    image: ${BACKEND_IMAGE:-job-platform-backend:latest}
+    command: ["python", "-m", "app.ingestion.scheduler"]
+    env_file: .env.prod
+    # SCHEDULER_METRICS_HOST_PORT (compose-only, not read by the app) is
+    # deliberately separate from SCHEDULER_METRICS_PORT (the app's own
+    # internal bind port, read from .env.prod) -- found live: reusing one
+    # variable for both, as dev's docker-compose.yml does, silently moves
+    # the container's internal bind port whenever the host-side port is
+    # changed to avoid a collision, breaking the mapping. Both default to
+    # 9101 so an unset .env.prod behaves like dev's convention.
+    ports:
+      - "${SCHEDULER_METRICS_HOST_PORT:-9101}:${SCHEDULER_METRICS_PORT:-9101}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

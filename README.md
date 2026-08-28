@@ -341,6 +341,8 @@ backend/alembic/versions/  Baseline (no-op) + create-jobs-table +
                             create-ingestion_runs-table migrations
 docker-compose.yml       Full local stack: backend, frontend, Postgres, Redis,
                           with healthchecks (STORY-005)
+docker-compose.prod.yml  Deployment target beyond local Compose -- pre-built
+                          images only, no build context (STORY-056)
 docs/                   Project documentation
 scripts/backup_db.sh    Local Postgres backup via pg_dump (STORY-055)
 scripts/restore_db.sh   Safe-by-default restore validation into a
@@ -565,6 +567,80 @@ Dump files may contain the same data as the running database (including
 anything that looks like production data once this is deployed anywhere)
 — **never commit a `.dump` file**. `backups/` and `*.dump` are both
 git-ignored; verify with `git status`/`git check-ignore` if in doubt.
+
+## Deployment
+
+**A documented, repeatable deployment procedure exists** (STORY-056):
+`docker-compose.prod.yml`. Unlike `docker-compose.yml` (dev), this file has
+no `build:` context anywhere — a real target host only ever needs this
+file, a `.env.prod` (deliberately a different filename than dev's own
+`.env`, so both can coexist unambiguously — see `.env.example`'s
+"Deployment" section for the variable names it reads), and the two
+pre-built images, never a source checkout. Backend configuration is
+already entirely environment-variable driven (`pydantic-settings`, since
+STORY-012) — no hardcoded environment branching exists anywhere in the
+application, so no code changes were needed for this Story.
+
+Procedure, exactly as exercised (adjust image tags/registry, ports, and
+credentials for your actual target):
+
+```bash
+# 1. Build the images (from a real deployment, you'd push these to a
+#    registry and pull/load them on the target host instead).
+docker build -t job-platform-backend:latest ./backend
+docker build -t job-platform-frontend:latest \
+  --build-arg NEXT_PUBLIC_API_BASE_URL=http://your-backend-host:8000 \
+  ./frontend
+
+# 2. Create .env.prod on the target host (same variable names as
+#    .env.example; real secrets this time, not placeholders).
+cp .env.example .env.prod   # then edit values
+
+# 3. Bring the stack up.
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+# 4. Apply migrations (a fresh database has no schema yet).
+docker compose -f docker-compose.prod.yml --env-file .env.prod \
+  exec backend alembic upgrade head
+
+# 5. Verify.
+curl http://your-host:$BACKEND_PORT/health/ready
+curl http://your-host:$FRONTEND_PORT/
+```
+
+**Known characteristic, not a defect**: `NEXT_PUBLIC_API_BASE_URL` is a
+Next.js client-side variable and can only be baked into the frontend image
+at *build* time (`frontend/Dockerfile`) — it is **not** read from
+`.env.prod` at deploy time. Pointing the frontend at a different backend
+URL means rebuilding the frontend image with that build arg, not just
+editing `.env.prod`.
+
+**Live-exercised once, exactly as documented above** (STORY-056's own
+validation, not just written and assumed to work): built both images,
+brought the stack up as a fully separate Docker Compose project running
+alongside the real dev stack (different project name, different host
+ports, its own isolated Postgres volume — proving zero interference with
+dev, verified before and after), ran migrations against the fresh
+database (baseline through the current head, all 8 revisions), and
+confirmed `/health/ready`, `/metrics`, the frontend's title, and the
+`/jobs/search` API all responded correctly — then tore the whole
+simulated deployment down, including its own volume, leaving the real dev
+stack and its data untouched throughout. A real bug was only found by
+actually running this, not by writing the compose file and assuming it
+worked: `SCHEDULER_METRICS_PORT` doubles as the scheduler's own internal
+metrics-server bind port (STORY-051); reusing it as the compose host-port
+mapping too (copied from dev's own pattern) meant changing it to dodge a
+host-port collision silently moved the *container's* internal bind port
+as well, breaking the mapping. Fixed with a second, compose-only
+variable, `SCHEDULER_METRICS_HOST_PORT`, so the host-side port can be
+chosen freely without touching the app's own internal port.
+
+No cloud account, registry, or real external credentials were used or
+required — this exercises the file's own correctness and repeatability
+locally, per the Story's own "specifics decided during implementation"
+allowance. CI-based automatic image publishing to a registry is a natural
+future step but isn't required by this Story's acceptance criteria and
+wasn't built here.
 
 ## Tests
 

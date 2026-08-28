@@ -2282,8 +2282,8 @@ STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
 STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-024, STORY-025,
 STORY-027, STORY-028, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033,
 STORY-035, STORY-043, STORY-045, STORY-046, STORY-049, STORY-050, STORY-051,
-STORY-052, STORY-053, STORY-054, STORY-055, and STORY-057 are complete — **44
-Stories, all at 100%**; no Story is currently in flight.
+STORY-052, STORY-053, STORY-054, STORY-055, STORY-056, and STORY-057 are
+complete — **45 Stories, all at 100%**; no Story is currently in flight.
 
 ## Prioritized Backlog
 
@@ -4231,17 +4231,76 @@ TypeScript") and it passed with 0 errors on every build run above.
   afterward. No live external ATS calls made or approved. No Stories'
   readiness changed (checked every `Dependencies` field in
   `requirement.md` for `STORY-049` — none found).
+- **STORY-056 — Deployment** — **complete, 100%**.
+  Deployment target chosen and explicitly approved by the human before any
+  file was touched (blocked on this — no cloud credentials of any kind
+  exist for this session, and CLAUDE.md requires explicit approval before
+  "deploying"/"modifying deployment infrastructure"): a local,
+  self-hosted simulation, not a real cloud account — satisfies "specifics
+  decided during implementation" without inventing costs or external
+  dependencies the human didn't ask for. New `docker-compose.prod.yml`:
+  standalone (not a dev-file override), no `build:` context anywhere —
+  only pre-built `image:` references (`BACKEND_IMAGE`/`FRONTEND_IMAGE`,
+  env-overridable, defaulting to local tags) — because a real target host
+  has no source checkout, only the pushed/loaded images. Reads its own
+  `.env.prod` (not dev's `.env`) so both can coexist unambiguously on one
+  machine. No application code changes needed or made — backend config is
+  already 100% environment-variable driven (`pydantic-settings`, since
+  STORY-012), satisfying "no hardcoded environment branching" as-is.
+  **Two real bugs found only by actually exercising the procedure, not by
+  writing the file and assuming it worked**: (1) `env_file: .env` was
+  copied verbatim from dev's compose file; since Compose's `--env-file`
+  flag only affects `${VAR}` substitution *inside* the compose YAML and
+  not which file a service's `env_file:` loads into the container, the
+  backend loaded stale dev credentials from the real `.env` regardless of
+  which `--env-file` was passed on the command line, causing a real
+  `password authentication failed` error against the freshly-created
+  prod-sim Postgres — fixed by hardcoding `env_file: .env.prod` so the two
+  concerns can't be pointed at different files by mistake. (2)
+  `SCHEDULER_METRICS_PORT` doubles as the scheduler's own internal
+  metrics-server bind port (STORY-051's own design); reusing it as the
+  compose host-port mapping too (again copied from dev's pattern, which
+  only works there because host and container happen to both be 9101)
+  meant changing it to dodge a host-port collision with the running dev
+  stack silently moved the *container's* internal bind port as well —
+  `curl` returned "Empty reply from server" against the mismapped port
+  until diagnosed via `/proc/net/tcp` inside the container showing the
+  process actually listening on the new (wrong) port. Fixed with a
+  second, compose-only variable, `SCHEDULER_METRICS_HOST_PORT`
+  (`.env.example`'s new "Deployment" section documents both). **Live
+  exercise, once, exactly as documented in README.md**: built both
+  images (one real transient failure along the way — a Docker Hub
+  DNS/network blip on the first frontend build attempt, confirmed
+  environmental by directly `docker pull`ing the same base image
+  immediately afterward and having it succeed; not a code or config
+  issue, resolved by retrying); brought the stack up as a fully separate
+  Compose project (`jobplatform-prod-sim`, different host ports, its own
+  isolated Postgres volume) alongside the real running dev stack; ran
+  `alembic upgrade head` against the fresh database (baseline through all
+  8 revisions to the current head); verified `/health/ready` (postgres +
+  redis both `ok`), the scheduler's own `/metrics` (`scheduler_due_sources
+  0.0`, on the corrected port), the frontend's title tag, and
+  `/jobs/search`; confirmed via `docker compose ps`/table-row-count
+  queries, both before and after, that the real dev stack (containers,
+  uptime, `jobs`/`sources` row counts) was completely undisturbed
+  throughout; tore the simulated deployment down completely, including
+  its own volume (`docker compose ... down -v`), confirmed via
+  `docker volume ls`/`docker network ls`/`docker ps -a` that nothing was
+  left behind. Files created: `docker-compose.prod.yml`. Files modified:
+  `.env.example` (+"Deployment" section), `README.md` (new "Deployment"
+  section + repository-structure entry), `progress.md`. `.env.prod`
+  itself (the throwaway local exercise file, containing a placeholder
+  prod-sim password) was never staged/committed — `.env.*` is already
+  git-ignored. No CI changes (automatic registry publishing is a natural
+  future step, not required by this Story's AC, and wasn't built). No
+  live external ATS calls made or approved.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/049/050/051/052/053/054/055/057
-are done — **44 Stories, all at 100%**. Per the Implementation Sequence
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/049/050/051/052/053/054/055/056/057
+are done — **45 Stories, all at 100%**. Per the Implementation Sequence
 (`requirement.md` §5) and actual Dependency fields:
 
-- **STORY-056 — Deployment**: `Dependencies: STORY-004 ✅, STORY-053 ✅` —
-  both now cleared. **STORY-056 is now Ready** (not implemented; STORY-053
-  deliberately did not touch deployment automation, per its own literal
-  technical note reserving that for STORY-056).
 - **STORY-048 — Accessibility**: depends on STORY-013 ✅, STORY-035 ✅,
   STORY-034 — still Blocked on STORY-034 (Job Detail Page), not yet built.
   A baseline (real labels, semantic controls, `aria-live`, visible focus)
@@ -4258,6 +4317,6 @@ are done — **44 Stories, all at 100%**. Per the Implementation Sequence
   (STORY-025 ✅, STORY-018 ✅, STORY-019 ✅) but is explicitly the lowest
   priority among currently-Ready Stories.
 
-**Not yet approved for implementation** — nothing beyond STORY-049 has been
+**Not yet approved for implementation** — nothing beyond STORY-056 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.
