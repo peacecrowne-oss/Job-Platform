@@ -32,7 +32,7 @@ way `/health` is -- a scraper polls continuously.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, metrics, search, sources
+from app.api import health, jobs, metrics, search, sources
 from app.config import get_settings
 from app.errors import register_exception_handlers
 from app.logging_config import CorrelationIdMiddleware, configure_logging
@@ -60,7 +60,12 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(health.router)
+    # search.router (/jobs/search) registered before jobs.router
+    # (/jobs/{job_id}) so the literal path always matches first --
+    # defensive, even though FastAPI's typed uuid.UUID path converter
+    # would already reject "search" as job_id and fall through.
     app.include_router(search.router)
+    app.include_router(jobs.router)
     app.include_router(sources.router)
     app.include_router(metrics.router)
 

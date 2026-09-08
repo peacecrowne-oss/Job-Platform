@@ -2281,9 +2281,9 @@ STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
 STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-024, STORY-025,
 STORY-027, STORY-028, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033,
-STORY-035, STORY-043, STORY-045, STORY-046, STORY-047, STORY-049, STORY-050,
-STORY-051, STORY-052, STORY-053, STORY-054, STORY-055, STORY-056, and
-STORY-057 are complete — **46 Stories, all at 100%**; no Story is
+STORY-034, STORY-035, STORY-043, STORY-045, STORY-046, STORY-047, STORY-049,
+STORY-050, STORY-051, STORY-052, STORY-053, STORY-054, STORY-055, STORY-056,
+and STORY-057 are complete — **47 Stories, all at 100%**; no Story is
 currently in flight.
 
 ## Prioritized Backlog
@@ -4366,32 +4366,116 @@ TypeScript") and it passed with 0 errors on every build run above.
   unsafe href both gone; cleaned up the test source/job row immediately
   afterward, confirmed `jobs`/`sources` both back to 0 rows. No live
   external ATS calls made or approved.
+- **STORY-034 — Job Detail Page** — **complete, 100%**.
+  Selected via the fresh full dependency sweep done for STORY-047 — its
+  only unmet dependency. New `GET /jobs/{job_id}` (`backend/app/api/
+  jobs.py`, separate router from `search.py` since the response shape is
+  fundamentally different — every §2 canonical field, not a search-
+  result-shaped subset). Excludes `raw_metadata`/`content_hash`/
+  `created_at`/`updated_at` (not §2 fields, matching `search.py`'s own
+  precedent); includes `closed_at` (not a §2 field either, but the actual
+  signal this Story's own "closed jobs visibly labeled" edge case needs —
+  distinct from `closing_date`, the source's own stated date). Security
+  boundary: `sanitize_html()` (STORY-047) is called *again* here,
+  immediately before serialization — the literal "again before
+  rendering" half of STORY-047's own requirement, not just re-testing its
+  ingest-time pass. Frontend: `frontend/app/jobs/[id]/page.tsx`, an async
+  Server Component (genuinely server-rendered, not client-fetched) at the
+  framework-standard `[id]` dynamic-route convention, with
+  `generateMetadata()` for a real per-job `<title>`. `notFound()`
+  (next/navigation) gives an actual HTTP 404 for a nonexistent job,
+  distinct from an inline `role="alert"` state for a genuine fetch/
+  network failure. `dangerouslySetInnerHTML` is used only on the five
+  fields that passed through `sanitize_html()` twice (ingest + this
+  endpoint) — documented as the one narrow, explicit boundary where it's
+  safe, never applied to anything else. `isSafeHttpUrl()` and the work-
+  mode/employment-type label maps were extracted out of `JobCard.tsx`
+  into `lib/urlSafety.ts`/`lib/labels.ts` (both now shared with the new
+  page) rather than copy-pasted a second time — a security-relevant check
+  should have one implementation. `JobCard`'s title now links to
+  `/jobs/{id}` (`next/link`). No STORY-048 (Accessibility) work, no new
+  breakpoints (reuses STORY-049's existing tokens), no design-system
+  changes. **Two real, live-tested-only findings, neither from reasoning
+  alone**: (1) the first SSR fetch attempt failed live with `ECONNREFUSED
+  127.0.0.1:8000` — the frontend container's own server-side `fetch()`
+  resolving "localhost" to itself, not the backend, a wrinkle no earlier
+  Story had hit because the search page is entirely client-fetched
+  ("use client"); fixed with a new server-only `INTERNAL_API_BASE_URL`
+  (`http://backend:8000`, never `NEXT_PUBLIC_`-prefixed so Next.js never
+  inlines it into client JS, so — unlike `NEXT_PUBLIC_API_BASE_URL` — it
+  doesn't even need to be a build arg) and a new `getServerApiBaseUrl()`
+  in `lib/config.ts`, falling back to `NEXT_PUBLIC_API_BASE_URL` for a
+  non-Docker local setup. (2) Repeated live E2E validation runs started
+  hitting the backend's own rate limiter (STORY-045, 60 req/60s/IP);
+  inspecting the real Redis keys (`ratelimit:job_detail:<ip>:<window>`)
+  showed why: because `/jobs/{id}` is now fetched *server-side*, every
+  real visitor's request shares one bucket keyed by the frontend
+  container's own fixed internal IP, not each user's actual IP — a
+  genuine architectural characteristic of combining STORY-045's per-IP
+  design with SSR, discovered only by inspecting live Redis state, not
+  assumed. Deliberately **not fixed** here — rate-limiting strategy is
+  STORY-045's own territory, this Story's AC doesn't touch it, and
+  redesigning it (e.g. an internal-traffic exemption, matching STORY-045's
+  own precedent for ingestion workers) is a materially separate decision;
+  flagged instead, and the local (git-ignored, uncommitted) `.env` had its
+  own `RATE_LIMIT_REQUESTS` bumped to 600 purely to unblock repeated local
+  validation runs — `.env.example`'s documented default (60) is
+  unchanged. A separate, genuinely pre-existing latent race in the
+  *existing* `search.spec.ts` E2E test (clicking Previous then
+  immediately filling/submitting the search box could race the page's own
+  URL-driven state reset, submitting an empty query) was also found live
+  during this Story's own repeated E2E runs and fixed with one
+  synchronization line in the test — confirmed unrelated to this Story's
+  own code (nothing in `page.tsx`'s state management was touched).
+  Files created: `backend/app/api/jobs.py`, `backend/tests/
+  test_jobs_api.py` (7 tests), `frontend/app/jobs/[id]/page.tsx`,
+  `frontend/lib/jobApi.ts`, `frontend/lib/labels.ts`, `frontend/lib/
+  urlSafety.ts`, `frontend/tests/JobDetailPage.test.tsx` (15 tests),
+  `frontend/tests-e2e/job-detail.spec.ts` (2 tests). Files modified:
+  `backend/app/main.py` (+router), `.env.example` (+`INTERNAL_API_BASE_
+  URL`), `frontend/components/JobCard.tsx` (extracted imports, title
+  link), `frontend/app/globals.css`, `frontend/lib/config.ts`
+  (+`getServerApiBaseUrl()`), `frontend/tests/config.test.ts` (+4 tests),
+  `frontend/tests-e2e/search.spec.ts` (race fix), `progress.md`. No
+  migration (no schema change -- every field already existed on `Job`).
+  Test suite: backend 502/502 (495 pre-existing + 7 new); frontend Vitest
+  75/75 (56 pre-existing + 15 new `JobDetailPage.test.tsx` + 4 new
+  `config.test.ts`); `npm run build` clean, `/jobs/[id]` correctly shows
+  as dynamic (server-rendered on demand), not static; full E2E suite
+  (search + responsive + job-detail, 9 tests) run clean 4 times
+  consecutively after the two live fixes above; `alembic check` clean;
+  `pip-audit` clean. Fixture jobs seeded/cleaned up via the existing
+  `seed_e2e_fixtures.py`/`--cleanup`, confirmed 0 rows in `jobs`/`sources`
+  afterward. No live external ATS calls made or approved.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/047/049/050/051/052/053/054/055/056/057
-are done — **46 Stories, all at 100%**. A fresh, full dependency sweep
-across all 61 Stories (not an older ticket mapping) was performed when
-selecting STORY-047; the resulting Ready/Blocked picture, per
-`requirement.md`'s literal Dependency fields:
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/034/035/043/045/046/047/049/050/051/052/053/054/055/056/057
+are done — **47 Stories, all at 100%**. Per `requirement.md`'s literal
+Dependency fields (continuing the fresh full sweep from STORY-047):
 
-- **STORY-034 — Job Detail Page** (P1): `Dependencies: STORY-013 ✅,
-  STORY-029 ✅, STORY-047 ✅` — all three now cleared. **STORY-034 is now
-  Ready** (not implemented). Highest-priority currently-Ready Story.
+- **STORY-048 — Accessibility** (P2): `Dependencies: STORY-013 ✅,
+  STORY-035 ✅, STORY-034 ✅` — all three now cleared by STORY-034's
+  completion. **STORY-048 is now Ready** (not implemented). A baseline
+  (real labels, semantic controls, `aria-live`, visible focus, reused by
+  the new detail page too) already exists from STORY-035/034, but
+  STORY-048 itself — automated axe checks, full WCAG 2.1 AA verification —
+  is not built or claimed complete.
 - **STORY-036 — Authentication** (P2): `Dependencies: STORY-007 ✅,
-  STORY-012 ✅` — Ready, unaffected by STORY-047.
+  STORY-012 ✅` — Ready, unaffected by STORY-034.
 - **STORY-058 — Caching Strategy** (P2): `Dependencies: STORY-008 ✅,
-  STORY-030 ✅` — Ready, unaffected by STORY-047.
+  STORY-030 ✅` — Ready, unaffected by STORY-034.
 - **STORY-026 — Advanced/Cross-Source Deduplication** (P3): `Dependencies:
-  STORY-025 ✅, STORY-018 ✅, STORY-019 ✅` — remains Ready, still the
-  lowest priority among currently-Ready Stories.
-- **STORY-048 — Accessibility** (P2): depends on STORY-013 ✅, STORY-035 ✅,
-  STORY-034 — still Blocked (STORY-034 is Ready but not yet implemented).
+  STORY-025 ✅, STORY-018 ✅, STORY-019 ✅` — remains Ready, lowest
+  priority among currently-Ready Stories.
+- **STORY-041 — Resume-to-Job Fit Analysis** (P3): `Dependencies:
+  STORY-040, STORY-034 ✅` — one of two now cleared; still Blocked on
+  STORY-040.
 - **STORY-037/038/039/040/059** all still Blocked on STORY-036
   (Authentication), not yet implemented.
-- **STORY-041/042/044/060/061**: each Blocked transitively through the
-  same STORY-036/040/034/059 chain — none newly Ready.
+- **STORY-042/044/060/061**: each Blocked transitively through the same
+  STORY-036/040/059 chain — none newly Ready.
 
-**Not yet approved for implementation** — nothing beyond STORY-047 has been
+**Not yet approved for implementation** — nothing beyond STORY-034 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.

@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 // STORY-054: the one currently-built "core user flow" (search) per the
-// literal AC's own "once built" qualifier -- job detail (STORY-034) and
-// auth (STORY-036) don't exist in this repository yet, so no E2E test is
-// written against nonexistent UI for either.
+// literal AC's own "once built" qualifier -- auth (STORY-036) doesn't
+// exist in this repository yet, so no E2E test is written against
+// nonexistent UI for it. Job detail (STORY-034) now exists -- see the
+// separate job-detail.spec.ts for its own navigation/rendering coverage.
 //
 // Requires the fixture jobs from backend/scripts/seed_e2e_fixtures.py
 // already seeded into the real local Docker Compose stack's database
@@ -31,6 +32,15 @@ test.describe("job search", () => {
     const secondPageFirstTitle = await page.locator(".job-card__title").first().textContent();
     expect(secondPageFirstTitle).not.toBe(firstPageFirstTitle);
     await page.getByRole("button", { name: "Previous" }).click();
+    // Wait for the Previous click's own URL-state navigation to fully
+    // settle before the next interaction -- otherwise the page's own
+    // URL-driven `useEffect` (which resets `form.q` whenever the URL
+    // changes) can race the very next fill() below and clobber it back
+    // to empty right before Search is clicked, submitting an unfiltered
+    // search instead. Pre-existing timing sensitivity in the app's own
+    // state management, not something this Story's own changes caused --
+    // fixed here as a test-only synchronization point.
+    await expect(page).toHaveURL("/");
 
     // 3: submit a keyword matching exactly one fixture job.
     await page.locator("#q").fill(DISTINCTIVE_TITLE);
