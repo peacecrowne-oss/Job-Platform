@@ -19,3 +19,9 @@ alembic==1.14.0
 # project's usual "no new dependency" discipline, justified because the
 # Story's own literal FR names this exact format.
 prometheus_client==0.26.0
+# STORY-047: Mozilla's Rust-backed `ammonia` binding -- hand-rolling HTML
+# sanitization correctly (safe attribute handling, URL-scheme filtering,
+# malformed-markup resilience) is exactly the kind of security-critical,
+# easy-to-get-wrong task that justifies a real library, same reasoning as
+# prometheus_client above.
+nh3==0.3.7

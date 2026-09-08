@@ -381,3 +381,25 @@ def test_scheduler_due_sources_gauge_reflects_due_count(db_session_committing) -
     run_all_due_sources(db_session_committing)
 
     assert scheduler_due_sources._value.get() == 2
+
+
+# --- STORY-047: HTML sanitization applied by the real pipeline ---
+
+
+def test_description_html_is_sanitized_before_persistence(db_session_committing) -> None:
+    malicious = _record(
+        "sanitize-1",
+        description_full='<p>Real role</p><script>alert(1)</script><a href="javascript:alert(2)">bad</a>',
+    )
+    source = _make_source(db_session_committing, config={"records": [malicious]})
+
+    run_source(db_session_committing, source)
+
+    job = (
+        db_session_committing.query(Job)
+        .filter(Job.source_job_id == "sanitize-1")
+        .one()
+    )
+    assert "<script" not in job.description_full
+    assert "javascript:" not in job.description_full
+    assert "<p>Real role</p>" in job.description_full

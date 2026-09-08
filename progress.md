@@ -2281,9 +2281,10 @@ STORY-006, STORY-007, STORY-008, STORY-009, STORY-010, STORY-011, STORY-012,
 STORY-013, STORY-014, STORY-015, STORY-016, STORY-017, STORY-018,
 STORY-019, STORY-020, STORY-021, STORY-022, STORY-023, STORY-024, STORY-025,
 STORY-027, STORY-028, STORY-029, STORY-030, STORY-031, STORY-032, STORY-033,
-STORY-035, STORY-043, STORY-045, STORY-046, STORY-049, STORY-050, STORY-051,
-STORY-052, STORY-053, STORY-054, STORY-055, STORY-056, and STORY-057 are
-complete — **45 Stories, all at 100%**; no Story is currently in flight.
+STORY-035, STORY-043, STORY-045, STORY-046, STORY-047, STORY-049, STORY-050,
+STORY-051, STORY-052, STORY-053, STORY-054, STORY-055, STORY-056, and
+STORY-057 are complete — **46 Stories, all at 100%**; no Story is
+currently in flight.
 
 ## Prioritized Backlog
 
@@ -4294,29 +4295,103 @@ TypeScript") and it passed with 0 errors on every build run above.
   git-ignored. No CI changes (automatic registry publishing is a natural
   future step, not required by this Story's AC, and wasn't built). No
   live external ATS calls made or approved.
+- **STORY-047 — Sanitization of External Job HTML** — **complete, 100%**.
+  Selected via a fresh, full read-only dependency sweep across all 61
+  Stories (requested explicitly, not assumed) — the only P0 among the four
+  genuinely-Ready Stories at the time (026 P3, 036 P2, 047 P0, 058 P2), and
+  the sole unmet dependency blocking STORY-034 (Job Detail Page). Real,
+  live gap confirmed before writing any code: `description_full` (and the
+  other four canonical "section" fields) were stored exactly as received
+  from connectors — raw, untrusted external HTML, explicitly flagged as
+  such in both connectors' own docstrings ("sanitization ... is
+  STORY-047's job, not this one's"). New dependency `nh3==0.3.7`
+  (Mozilla's Rust-backed `ammonia` binding) — the modern, actively-
+  maintained successor to `bleach`, chosen the same way `prometheus_client`
+  was in STORY-051: hand-rolling HTML sanitization correctly (safe
+  attribute handling, URL-scheme filtering, malformed-markup resilience)
+  is exactly the kind of security-critical, easy-to-get-wrong task that
+  justifies a real library. New `backend/app/sanitization.py`:
+  `sanitize_html()`, one function, an explicit (not library-default)
+  allow-list (`p, br, ul, ol, li, strong, b, em, i, u, a, h1-h4, span`;
+  `href` only on `a`). Applied centrally in the shared pipeline
+  (`orchestrator.py`, right after `connector.normalize()`/`validate()`,
+  before `validate_batch()`) to all five canonical free-text section
+  fields (`description_full`, `responsibilities`, `requirements`,
+  `preferred_requirements`, `qualifications`) — not per-connector, per
+  STORY-016's own principle — and deliberately *before* STORY-027's blank-
+  description check, so a description that's entirely malicious markup
+  correctly reads as blank rather than present-but-unsanitized.
+  `skills`/`benefits` (short list-of-string fields) explicitly out of
+  scope — not treated as HTML-bearing by any current connector, a flagged
+  scope boundary. Every behavioral claim about `nh3` was verified live
+  against the real library before being relied on, not assumed from its
+  docs: `<script>` and its content fully removed; `javascript:`-scheme
+  `href` values dropped entirely (not merely escaped) since `nh3`'s
+  default scheme allow-list is http/https/mailto only; inline event-
+  handler attributes (`onclick=`) stripped; `rel="noopener noreferrer"` is
+  forced onto every surviving `<a>` by `nh3`'s own default `link_rel`
+  behavior (a happy, unplanned consistency with `JobCard`'s existing
+  external-link convention); legitimate formatting (`<p>`/`<ul>`/`<li>`)
+  preserved; a `<style>` tag has its content removed entirely (unlike a
+  generic disallowed tag like `<div>`, whose text content survives, tag
+  stripped) — confirmed via direct interactive testing against the real
+  library before writing the corresponding test assertions. Both
+  connectors' docstrings corrected (the "stored verbatim" claims were no
+  longer accurate once sanitization landed). Files created:
+  `backend/app/sanitization.py`, `backend/tests/test_sanitization.py` (10
+  tests). Files modified: `backend/requirements.txt` (+`nh3`),
+  `backend/app/ingestion/orchestrator.py` (+5-field sanitization call),
+  `backend/app/connectors/greenhouse.py`/`ashby.py` (docstring
+  correction), `backend/tests/test_orchestrator.py` (+1 real-pipeline
+  test), `README.md`, `progress.md`. No migration (no schema change --
+  same `Text` columns, now storing sanitized rather than raw content). No
+  API/frontend changes (the search API already excludes these fields
+  entirely; no page renders them yet). **Real infrastructure issue found
+  and resolved, unrelated to this Story's own code**: the first full
+  regression run showed 4 failures in `test_locking.py` and a suspicious
+  45-test skip count; traced (not assumed) to the entire local dev Docker
+  stack having been stopped for about a week (`docker compose ps -a`
+  showed `Exited ... 7 days ago` on postgres/backend/frontend/redis — only
+  `scheduler` has `restart: unless-stopped` and had auto-restarted after a
+  presumed host reboot) rather than any code defect; resolved with
+  `docker compose up -d`, then the full suite re-run cleanly. Test suite:
+  495/495 passing (484 pre-existing + 11 new), individually re-confirmed
+  by name; `alembic check` clean (no schema change); `pip-audit` clean.
+  **Live end-to-end validation, not just the test suite**: pushed the new
+  files into the real running `backend` container, registered a throwaway
+  connector via a live Python session, ran a real `run_source()` against
+  the actual dev Postgres with a payload containing `<script>alert(1)
+  </script>` and a `javascript:` link — confirmed the persisted `Job` row
+  stored `<p>Real</p><a rel="noopener noreferrer">bad</a>`, script and
+  unsafe href both gone; cleaned up the test source/job row immediately
+  afterward, confirmed `jobs`/`sources` both back to 0 rows. No live
+  external ATS calls made or approved.
 
 ## Immediate Next Step
 
-STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/049/050/051/052/053/054/055/056/057
-are done — **45 Stories, all at 100%**. Per the Implementation Sequence
-(`requirement.md` §5) and actual Dependency fields:
+STORY-001/002/003/004/005/006/007/008/009/010/011/012/013/014/015/016/017/018/019/020/021/022/023/024/025/027/028/029/030/031/032/033/035/043/045/046/047/049/050/051/052/053/054/055/056/057
+are done — **46 Stories, all at 100%**. A fresh, full dependency sweep
+across all 61 Stories (not an older ticket mapping) was performed when
+selecting STORY-047; the resulting Ready/Blocked picture, per
+`requirement.md`'s literal Dependency fields:
 
-- **STORY-048 — Accessibility**: depends on STORY-013 ✅, STORY-035 ✅,
-  STORY-034 — still Blocked on STORY-034 (Job Detail Page), not yet built.
-  A baseline (real labels, semantic controls, `aria-live`, visible focus)
-  was already included in STORY-035's own UI, but STORY-048 itself —
-  automated axe checks, full WCAG 2.1 AA verification — is not built or
-  claimed complete.
-- **STORY-058 — Caching Strategy** (P2) remains Ready (STORY-008 ✅,
-  STORY-030 ✅) — unaffected directly by STORY-054.
-- **STORY-039 — Saved Searches** depends on STORY-036, STORY-031 ✅ — not
-  STORY-054 — unaffected directly; still Blocked on STORY-036.
-- **STORY-036 — Authentication**: unaffected directly (depends on
-  STORY-007 ✅, STORY-012 ✅, not STORY-054) — already Ready.
-- **STORY-026 — Advanced/Cross-Source Deduplication** (P3) remains Ready
-  (STORY-025 ✅, STORY-018 ✅, STORY-019 ✅) but is explicitly the lowest
-  priority among currently-Ready Stories.
+- **STORY-034 — Job Detail Page** (P1): `Dependencies: STORY-013 ✅,
+  STORY-029 ✅, STORY-047 ✅` — all three now cleared. **STORY-034 is now
+  Ready** (not implemented). Highest-priority currently-Ready Story.
+- **STORY-036 — Authentication** (P2): `Dependencies: STORY-007 ✅,
+  STORY-012 ✅` — Ready, unaffected by STORY-047.
+- **STORY-058 — Caching Strategy** (P2): `Dependencies: STORY-008 ✅,
+  STORY-030 ✅` — Ready, unaffected by STORY-047.
+- **STORY-026 — Advanced/Cross-Source Deduplication** (P3): `Dependencies:
+  STORY-025 ✅, STORY-018 ✅, STORY-019 ✅` — remains Ready, still the
+  lowest priority among currently-Ready Stories.
+- **STORY-048 — Accessibility** (P2): depends on STORY-013 ✅, STORY-035 ✅,
+  STORY-034 — still Blocked (STORY-034 is Ready but not yet implemented).
+- **STORY-037/038/039/040/059** all still Blocked on STORY-036
+  (Authentication), not yet implemented.
+- **STORY-041/042/044/060/061**: each Blocked transitively through the
+  same STORY-036/040/034/059 chain — none newly Ready.
 
-**Not yet approved for implementation** — nothing beyond STORY-056 has been
+**Not yet approved for implementation** — nothing beyond STORY-047 has been
 authorized. A fresh implementation plan must be presented and separately
 approved before any code is written.

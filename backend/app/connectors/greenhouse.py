@@ -17,9 +17,10 @@ is left `None`, never guessed from inconsistent per-board `metadata`
 entries. The entire raw job object is preserved in `raw_metadata` so
 nothing is lost even though only a subset maps to canonical fields.
 
-`description_full` stores Greenhouse's `content` field verbatim -- raw,
-untrusted HTML. Nothing here parses, strips, or renders it; sanitization
-before any display is STORY-047's job, not this one's.
+`description_full` stores Greenhouse's `content` field as-is -- raw,
+untrusted HTML at this point. Nothing here parses, strips, or renders it;
+sanitization happens centrally in the shared ingestion pipeline
+(`app.sanitization.sanitize_html()`, STORY-047), not per-connector.
 
 Every request goes through the injected `self.http_client` (a
 `PolicyEnforcingHttpClient` in production) -- this file never imports

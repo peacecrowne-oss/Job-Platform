@@ -82,6 +82,7 @@ from app.logging_config import correlation_id_var
 from app.metrics import ingestion_runs_total, scheduler_due_sources
 from app.models.ingestion_run import IngestionRun
 from app.models.source import Source
+from app.sanitization import sanitize_html
 from app.validation.data_quality import validate_batch
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,15 @@ def run_source(session: Session, source: Source) -> IngestionRun:
             if not connector.validate(record):
                 jobs_failed += 1
                 continue
+            # STORY-047: sanitize before validate_batch() below, so its
+            # blank-description check evaluates the sanitized text -- a
+            # description that's entirely malicious markup should read as
+            # blank, not as present-but-unsanitized.
+            record.description_full = sanitize_html(record.description_full)
+            record.responsibilities = sanitize_html(record.responsibilities)
+            record.requirements = sanitize_html(record.requirements)
+            record.preferred_requirements = sanitize_html(record.preferred_requirements)
+            record.qualifications = sanitize_html(record.qualifications)
             normalized.append(record)
 
         outcomes = validate_batch(normalized, source_company_name=source.name)

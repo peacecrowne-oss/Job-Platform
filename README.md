@@ -187,8 +187,9 @@ provide (company name, structured responsibilities/skills, etc.) is left
 `work_mode`/`employment_type` (fields Greenhouse's API has no equivalent
 for) and defensively excludes any job explicitly marked `isListed: false`
 (defense in depth — the public endpoint is believed to already exclude
-unlisted jobs). Both connectors preserve raw HTML descriptions untouched
-as untrusted data pending STORY-047, and the complete raw job payload in
+unlisted jobs). Both connectors hand off raw HTML descriptions as untrusted
+data to the shared pipeline's sanitization step (STORY-047 —
+`app/sanitization.py`), and preserve the complete raw job payload in
 `raw_metadata`. Both were verified against their real live public boards
 during implementation (Greenhouse: 14 real records; Ashby: 62 real
 records, confirming the field-shape assumptions the mapping was built on)
@@ -204,8 +205,22 @@ issues as non-blocking warnings (empty description, malformed
 value), and never raises an issue at all for merely-absent optional data
 (compensation, benefits, department, etc.) — matching `requirement.md`'s
 own edge case. `validate_batch()` guarantees one malformed record can
-never prevent the rest of a batch from being validated. Exact
-deduplication (STORY-025 — `app/ingestion/dedup.py`) now implements the
+never prevent the rest of a batch from being validated. HTML sanitization
+(STORY-047 — `app/sanitization.py`) runs immediately after normalization,
+before validation (so a description that's entirely malicious markup
+correctly reads as blank to STORY-027's own check, not as present-but-
+unsanitized): `description_full`/`responsibilities`/`requirements`/
+`preferred_requirements`/`qualifications` are stripped to an explicit
+allow-list (paragraphs, line breaks, lists, basic emphasis, headings,
+links) via `nh3` (Mozilla's Rust-backed `ammonia` binding) — scripts,
+styles, and event-handler attributes are removed entirely, unsafe URL
+schemes (`javascript:`) are dropped rather than escaped, and every
+surviving link gets `rel="noopener noreferrer"` forced on it. Applied
+once, centrally, in the shared pipeline — not per-connector — the same
+function STORY-034 (Job Detail Page, not yet built) will call again at
+render time. `skills`/`benefits` (short list-of-string fields) are
+explicitly out of scope, not treated as HTML-bearing content by any
+current connector. Exact deduplication (STORY-025 — `app/ingestion/dedup.py`) now implements the
 logic behind `jobs.content_hash`/`first_seen_at`/`last_seen_at` — three
 columns that existed since STORY-010 as declared-but-unused schema hooks.
 `upsert_job()`/`upsert_batch()` key strictly on `(source, source_job_id)`
@@ -295,13 +310,17 @@ backend/app/connectors/ashby.py       AshbyConnector -- real connector against
 backend/app/validation/data_quality.py  validate_record()/validate_batch() --
                                          required-field/sanity-check validation
                                          for NormalizedJobRecord (STORY-027)
+backend/app/sanitization.py  sanitize_html() -- allow-listed HTML sanitization
+                              (nh3) for externally-sourced description/
+                              requirements text, applied centrally in the
+                              shared pipeline (STORY-047)
 backend/app/ingestion/dedup.py  upsert_job()/upsert_batch() -- exact deduplication
                                  keyed on (source, source_job_id) (STORY-025)
 backend/app/ingestion/retry.py  with_retry() -- bounded exponential backoff +
                                  jitter for transient connector failures (STORY-022)
 backend/app/ingestion/orchestrator.py  run_source()/run_all_due_sources() -- the
                                  shared ingestion pipeline wiring STORY-017/022/
-                                 025/027/015 together (STORY-021); each due
+                                 025/027/047/015 together (STORY-021); each due
                                  source runs in its own thread, bounded by a
                                  per-source timeout (STORY-023)
 backend/app/ingestion/locking.py  Postgres session-scoped advisory lock preventing
@@ -328,7 +347,7 @@ backend/app/api/metrics.py  GET /metrics -- not rate-limited, exempted the
                              same way /health is (STORY-051)
 backend/tests/          Backend test suite (pytest; no live infra required)
 backend/requirements.txt      Pinned runtime dependencies (incl. SQLAlchemy,
-                               psycopg2-binary, redis, prometheus_client)
+                               psycopg2-binary, redis, prometheus_client, nh3)
 backend/requirements-dev.txt  Runtime + test dependencies (pytest, httpx)
 backend/pytest.ini      pytest configuration (adds backend/ to the import path)
 backend/Dockerfile      Multi-stage build image (STORY-004; also copies

@@ -29,9 +29,10 @@ gave something that doesn't fit," not a fabrication. An unrecognized
 has no multi-location field, and adding one isn't literally required by
 this Story's AC -- so it's preserved in `raw_metadata` only.
 
-`descriptionHtml` (or `descriptionPlain` as fallback) is stored verbatim in
-`description_full` -- untrusted external content, never parsed or
-sanitized here (STORY-047's job).
+`descriptionHtml` (or `descriptionPlain` as fallback) is stored as-is in
+`description_full` at this point -- untrusted external content, never
+parsed or sanitized here; sanitization happens centrally in the shared
+ingestion pipeline (`app.sanitization.sanitize_html()`, STORY-047).
 
 Every request goes through the injected `self.http_client` only -- this
 file never imports `urllib`/`requests`/sockets, so STORY-017's policy
