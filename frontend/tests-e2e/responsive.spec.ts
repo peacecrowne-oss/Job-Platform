@@ -38,6 +38,12 @@ test.describe("responsive layout", () => {
     await expect(page.getByRole("button", { name: "Previous" })).toBeEnabled();
     expect(await hasNoHorizontalOverflow(page)).toBe(true);
     await page.getByRole("button", { name: "Previous" }).click();
+    // Same pre-existing race as search.spec.ts (unrelated to STORY-048's
+    // own changes): wait for the Previous click's URL-state navigation to
+    // settle before filling the search box, or the page's own URL-driven
+    // effect can reset form.q back to empty right before Search is
+    // clicked.
+    await expect(page).toHaveURL("/");
 
     await page.locator("#q").fill("Principal Distributed Systems Engineer");
     await page.getByRole("button", { name: "Search", exact: true }).click();

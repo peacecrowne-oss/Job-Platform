@@ -110,12 +110,12 @@ export default async function JobDetailPage({ params }: PageParams) {
       <p className="job-card__links">
         {job.application_url && isSafeHttpUrl(job.application_url) && (
           <a href={job.application_url} target="_blank" rel="noopener noreferrer">
-            Apply&nbsp;&#8599;
+            Apply&nbsp;<span aria-hidden="true">&#8599;</span>
           </a>
         )}
         {job.source_url && isSafeHttpUrl(job.source_url) && (
           <a href={job.source_url} target="_blank" rel="noopener noreferrer">
-            View original posting&nbsp;&#8599;
+            View original posting&nbsp;<span aria-hidden="true">&#8599;</span>
           </a>
         )}
       </p>

@@ -51,6 +51,18 @@ def test_disallowed_tag_is_stripped_but_its_text_content_kept() -> None:
     assert "visible" in result
 
 
+def test_heading_tags_are_stripped_but_text_content_kept() -> None:
+    # STORY-048: headings aren't in the allow-list -- externally-sourced
+    # content rendered via dangerouslySetInnerHTML must never be able to
+    # inject a second <h1> or an out-of-order heading into the page's own
+    # heading hierarchy. Stripped like a generic disallowed tag (text kept),
+    # not like <script>/<style> (content removed entirely).
+    result = sanitize_html("<h1>Big Title</h1><p>body</p>")
+    assert "<h1" not in result
+    assert "Big Title" in result
+    assert "<p>body</p>" in result
+
+
 def test_entirely_malicious_input_sanitizes_to_empty_string() -> None:
     assert sanitize_html("<script>alert(1)</script>") == ""
 

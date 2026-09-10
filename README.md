@@ -271,16 +271,20 @@ not yet implemented.
 | Search | PostgreSQL full-text search initially; OpenSearch only if later justified |
 | Containerization | Docker, Docker Compose |
 | CI | GitHub Actions |
-| Testing | pytest (backend), vitest (frontend unit), Playwright (end-to-end, not yet added) |
+| Testing | pytest (backend), vitest (frontend unit), Playwright (end-to-end, incl. @axe-core/playwright for accessibility) |
 
 ## Repository structure
 
 ```
 frontend/               Next.js + TypeScript app
-frontend/app/           App Router: root layout + job search page (STORY-013, STORY-035)
+frontend/app/           App Router: root layout, job search page (STORY-013,
+                         STORY-035), job detail page (STORY-034)
 frontend/components/    JobCard (STORY-035)
-frontend/lib/           Environment-driven config, search API client, URL-state helpers
-frontend/tests/         Frontend test suite (vitest + Testing Library; 56 tests)
+frontend/lib/           Environment-driven config, search/job API clients,
+                         URL-state helpers, shared label/URL-safety helpers
+frontend/tests/         Frontend test suite (vitest + Testing Library; 75 tests)
+frontend/tests-e2e/     Playwright E2E specs: search, responsive, job detail,
+                         accessibility (STORY-048 — @axe-core/playwright)
 frontend/package.json   Pinned dependencies; package-lock.json for reproducible installs
 frontend/Dockerfile     Multi-stage build image (STORY-004)
 frontend/.dockerignore
@@ -919,6 +923,26 @@ Docker at all, a deliberately-introduced failing test confirmed `pytest`
 returns a real non-zero exit code, and the real `job_platform`
 database/Redis DB 0 confirmed untouched (row/key counts checked before and
 after) by every integration/E2E run including their own cleanup steps.
+
+**Accessibility (STORY-048)**: `tests-e2e/accessibility.spec.ts` runs
+`@axe-core/playwright` (WCAG 2.1 A/AA tags) against the real rendered search
+and job detail pages — the two flows that exist; auth/saved jobs aren't
+built yet, matching the same "don't test nonexistent UI" precedent
+`search.spec.ts` already established for STORY-054. Zero violations
+required to pass, not a "no critical only" threshold. Two real, live-
+verified fixes came out of this Story rather than reasoning alone: the
+decorative `↗` arrow next to "Apply"/"View original posting" is now
+`aria-hidden` (its literal glyph was otherwise part of the link's
+accessible name); and `app/sanitization.py`'s (STORY-047) allow-list no
+longer permits `h1`-`h4` — externally-sourced job description HTML
+rendered via `dangerouslySetInnerHTML` (STORY-034) could otherwise inject
+a second `<h1>` or an out-of-order heading into the page's own heading
+hierarchy. Color contrast was computed for every color in the palette (not
+assumed): all text pairings exceed WCAG AA's 4.5:1 by a wide margin
+(lowest is 6.4:1); `--color-border`'s use on input/button boundaries sits
+at 1.43:1, below SC 1.4.11's 3:1 for non-text UI contrast — a real,
+flagged characteristic that `axe-core`'s automated color-contrast rule
+(text-focused) doesn't catch, not silently ignored.
 
 No coverage percentage gate is enforced (`pytest-cov` is wired in
 diagnostically only, since STORY-054's own literal AC specifies none).

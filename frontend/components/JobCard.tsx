@@ -52,12 +52,12 @@ export function JobCard({ job }: { job: JobSearchResult }) {
       <p className="job-card__links">
         {job.source_url && isSafeHttpUrl(job.source_url) && (
           <a href={job.source_url} target="_blank" rel="noopener noreferrer">
-            View original posting&nbsp;↗
+            View original posting&nbsp;<span aria-hidden="true">↗</span>
           </a>
         )}
         {job.application_url && isSafeHttpUrl(job.application_url) && (
           <a href={job.application_url} target="_blank" rel="noopener noreferrer">
-            Apply&nbsp;↗
+            Apply&nbsp;<span aria-hidden="true">↗</span>
           </a>
         )}
       </p>
